@@ -149,6 +149,10 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|AppleClang|Clang")
     message(STATUS "Compiler does not support -Wimplicit-fallthrough")
   endif()
 
+  if (CMAKE_COMPILER_IS_GNUCC AND CMAKE_C_COMPILER_VERSION VERSION_LESS 8)
+    add_compile_options(-Wno-strict-overflow)
+  endif()
+
   # On UNIX, the compiler needs to support -fvisibility=hidden to hide symbols by default
   check_c_compiler_flag(-fvisibility=hidden CC_SUPPORTS_VISIBILITY_HIDDEN)
 
