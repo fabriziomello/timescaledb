@@ -78,7 +78,7 @@
 #include "deparse.h"
 #include "timezones.h"
 
-#define FINALFN "finalize_agg"
+#define FINALFN "finalize_partial"
 #define PARTIALFN "partialize_agg"
 #define DEFAULT_MATPARTCOLUMN_NAME "time_partition_col"
 #define MATPARTCOL_INTERVAL_FACTOR 10
@@ -164,8 +164,8 @@ typedef struct MatTableColumnInfo
 
 typedef struct FinalizeQueryInfo
 {
-	List *final_seltlist;   /*select target list for finalize query */
-	Node *final_havingqual; /*having qual for finalize query */
+	List *final_seltlist;   /* select target list for finalize query */
+	Node *final_havingqual; /* having qual for finalize query */
 	Query *final_userquery; /* user query used to compute the finalize_query */
 } FinalizeQueryInfo;
 
@@ -232,7 +232,7 @@ static void
 create_cagg_catalog_entry(int32 matht_id, int32 rawht_id, const char *user_schema,
 						  const char *user_view, const char *partial_schema,
 						  const char *partial_view, int64 bucket_width, bool materialized_only,
-						  const char *direct_schema, const char *direct_view)
+						  const char *direct_schema, const char *direct_view, const int32 version)
 {
 	Catalog *catalog = ts_catalog_get();
 	Relation rel;
@@ -269,6 +269,7 @@ create_cagg_catalog_entry(int32 matht_id, int32 rawht_id, const char *user_schem
 		NameGetDatum(&direct_viewnm);
 	values[AttrNumberGetAttrOffset(Anum_continuous_agg_materialize_only)] =
 		BoolGetDatum(materialized_only);
+	values[AttrNumberGetAttrOffset(Anum_continuous_agg_version)] = Int32GetDatum(version);
 
 	ts_catalog_database_info_become_owner(ts_catalog_database_info_get(), &sec_ctx);
 	ts_catalog_insert_values(rel, desc, values, nulls);
@@ -1200,76 +1201,76 @@ cagg_validate_query(Query *query)
  * ts_internal_cagg_final( Oid, Oid, bytea, NULL::output_typeid)
  * the arguments are a list of targetentry
  */
-static Oid
-get_finalizefnoid()
-{
-	Oid finalfnoid;
-	Oid finalfnargtypes[] = { TEXTOID,  NAMEOID,	  NAMEOID, get_array_type(NAMEOID),
-							  BYTEAOID, ANYELEMENTOID };
-	List *funcname = list_make2(makeString(INTERNAL_SCHEMA_NAME), makeString(FINALFN));
-	int nargs = sizeof(finalfnargtypes) / sizeof(finalfnargtypes[0]);
-	finalfnoid = LookupFuncName(funcname, nargs, finalfnargtypes, false);
-	return finalfnoid;
-}
+// static Oid
+// get_finalizefnoid()
+// {
+// 	Oid finalfnoid;
+// 	Oid finalfnargtypes[] = { TEXTOID,  NAMEOID,	  NAMEOID, get_array_type(NAMEOID),
+// 							  BYTEAOID, ANYELEMENTOID };
+// 	List *funcname = list_make2(makeString(INTERNAL_SCHEMA_NAME), makeString(FINALFN));
+// 	int nargs = sizeof(finalfnargtypes) / sizeof(finalfnargtypes[0]);
+// 	finalfnoid = LookupFuncName(funcname, nargs, finalfnargtypes, false);
+// 	return finalfnoid;
+// }
 
 /* Build a [N][2] array where N is number of arguments and the inner array is of [schema_name,
  * type_name] */
-static Datum
-get_input_types_array_datum(Aggref *original_aggregate)
-{
-	ListCell *lc;
-	MemoryContext builder_context =
-		AllocSetContextCreate(CurrentMemoryContext, "input types builder", ALLOCSET_DEFAULT_SIZES);
-	Oid name_array_type_oid = get_array_type(NAMEOID);
-	ArrayBuildStateArr *outer_builder =
-		initArrayResultArr(name_array_type_oid, NAMEOID, builder_context, false);
-	Datum result;
+// static Datum
+// get_input_types_array_datum(Aggref *original_aggregate)
+// {
+// 	ListCell *lc;
+// 	MemoryContext builder_context =
+// 		AllocSetContextCreate(CurrentMemoryContext, "input types builder", ALLOCSET_DEFAULT_SIZES);
+// 	Oid name_array_type_oid = get_array_type(NAMEOID);
+// 	ArrayBuildStateArr *outer_builder =
+// 		initArrayResultArr(name_array_type_oid, NAMEOID, builder_context, false);
+// 	Datum result;
 
-	foreach (lc, original_aggregate->args)
-	{
-		TargetEntry *te = lfirst(lc);
-		Oid type_oid = exprType((Node *) te->expr);
-		ArrayBuildState *schema_name_builder = initArrayResult(NAMEOID, builder_context, false);
-		HeapTuple tp;
-		Form_pg_type typtup;
-		char *schema_name;
-		Name type_name = (Name) palloc0(NAMEDATALEN);
-		Datum schema_datum;
-		Datum type_name_datum;
-		Datum inner_array_datum;
+// 	foreach (lc, original_aggregate->args)
+// 	{
+// 		TargetEntry *te = lfirst(lc);
+// 		Oid type_oid = exprType((Node *) te->expr);
+// 		ArrayBuildState *schema_name_builder = initArrayResult(NAMEOID, builder_context, false);
+// 		HeapTuple tp;
+// 		Form_pg_type typtup;
+// 		char *schema_name;
+// 		Name type_name = (Name) palloc0(NAMEDATALEN);
+// 		Datum schema_datum;
+// 		Datum type_name_datum;
+// 		Datum inner_array_datum;
 
-		tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
-		if (!HeapTupleIsValid(tp))
-			elog(ERROR, "cache lookup failed for type %u", type_oid);
+// 		tp = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
+// 		if (!HeapTupleIsValid(tp))
+// 			elog(ERROR, "cache lookup failed for type %u", type_oid);
 
-		typtup = (Form_pg_type) GETSTRUCT(tp);
-		namestrcpy(type_name, NameStr(typtup->typname));
-		schema_name = get_namespace_name(typtup->typnamespace);
-		ReleaseSysCache(tp);
+// 		typtup = (Form_pg_type) GETSTRUCT(tp);
+// 		namestrcpy(type_name, NameStr(typtup->typname));
+// 		schema_name = get_namespace_name(typtup->typnamespace);
+// 		ReleaseSysCache(tp);
 
-		type_name_datum = NameGetDatum(type_name);
-		/* using name in because creating from a char * (that may be null or too long) */
-		schema_datum = DirectFunctionCall1(namein, CStringGetDatum(schema_name));
+// 		type_name_datum = NameGetDatum(type_name);
+// 		/* using name in because creating from a char * (that may be null or too long) */
+// 		schema_datum = DirectFunctionCall1(namein, CStringGetDatum(schema_name));
 
-		accumArrayResult(schema_name_builder, schema_datum, false, NAMEOID, builder_context);
-		accumArrayResult(schema_name_builder, type_name_datum, false, NAMEOID, builder_context);
+// 		accumArrayResult(schema_name_builder, schema_datum, false, NAMEOID, builder_context);
+// 		accumArrayResult(schema_name_builder, type_name_datum, false, NAMEOID, builder_context);
 
-		inner_array_datum = makeArrayResult(schema_name_builder, CurrentMemoryContext);
+// 		inner_array_datum = makeArrayResult(schema_name_builder, CurrentMemoryContext);
 
-		accumArrayResultArr(outer_builder,
-							inner_array_datum,
-							false,
-							name_array_type_oid,
-							builder_context);
-	}
-	result = makeArrayResultArr(outer_builder, CurrentMemoryContext, false);
+// 		accumArrayResultArr(outer_builder,
+// 							inner_array_datum,
+// 							false,
+// 							name_array_type_oid,
+// 							builder_context);
+// 	}
+// 	result = makeArrayResultArr(outer_builder, CurrentMemoryContext, false);
 
-	MemoryContextDelete(builder_context);
-	return result;
-}
+// 	MemoryContextDelete(builder_context);
+// 	return result;
+// }
 
-/* creates an aggref of the form:
- * finalize-agg(
+/* creates an FuncExpr of the form:
+ * finalize-partial(
  *                "sum(int)" TEXT,
  *                collation_schema_name NAME, collation_name NAME,
  *                input_types_array NAME[N][2],
@@ -1278,141 +1279,122 @@ get_input_types_array_datum(Aggref *original_aggregate)
  *             )
  * here sum(int) is the input aggregate "inp" in the parameter-list
  */
-static Aggref *
-get_finalize_aggref(Aggref *inp, Var *partial_state_var)
-{
-	Aggref *aggref;
-	TargetEntry *te;
-	char *agggregate_signature;
-	Const *aggregate_signature_const, *collation_schema_const, *collation_name_const,
-		*input_types_const, *return_type_const;
-	Oid name_array_type_oid = get_array_type(NAMEOID);
-	Var *partial_bytea_var;
-	List *tlist = NIL;
-	int tlist_attno = 1;
-	List *argtypes = NIL;
-	char *collation_name = NULL, *collation_schema_name = NULL;
-	Datum collation_name_datum = (Datum) 0;
-	Datum collation_schema_datum = (Datum) 0;
-	Oid finalfnoid = get_finalizefnoid();
+// static FuncExpr *
+// get_finalize_partial_funcexpr(Aggref *inp, Var *partial_state_var)
+// {
+// 	FuncExpr *finalize_partial;
+// 	char *agggregate_signature;
+// 	Const *aggregate_signature_const, *collation_schema_const, *collation_name_const,
+// 		*input_types_const, *return_type_const;
+// 	Var *partial_bytea_var;
+// 	List *funcargs = NIL;
+// 	char *collation_name = NULL, *collation_schema_name = NULL;
+// 	Datum collation_name_datum = (Datum) 0;
+// 	Datum collation_schema_datum = (Datum) 0;
+// 	Oid finalfnoid = get_finalizefnoid();
 
-	argtypes = list_make5_oid(TEXTOID, NAMEOID, NAMEOID, name_array_type_oid, BYTEAOID);
-	argtypes = lappend_oid(argtypes, inp->aggtype);
+// 	/* construct the arguments */
+// 	agggregate_signature = format_procedure_qualified(inp->aggfnoid);
+// 	aggregate_signature_const = makeConst(TEXTOID,
+// 										  -1,
+// 										  DEFAULT_COLLATION_OID,
+// 										  -1,
+// 										  CStringGetTextDatum(agggregate_signature),
+// 										  false,
+// 										  false /* passbyval */
+// 	);
+// 	funcargs = lappend(funcargs, aggregate_signature_const);
 
-	aggref = makeNode(Aggref);
-	aggref->aggfnoid = finalfnoid;
-	aggref->aggtype = inp->aggtype;
-	aggref->aggcollid = inp->aggcollid;
-	aggref->inputcollid = inp->inputcollid;
-	aggref->aggtranstype = InvalidOid; /* will be set by planner */
-	aggref->aggargtypes = argtypes;
-	aggref->aggdirectargs = NULL; /*relevant for hypothetical set aggs*/
-	aggref->aggorder = NULL;
-	aggref->aggdistinct = NULL;
-	aggref->aggfilter = NULL;
-	aggref->aggstar = false;
-	aggref->aggvariadic = false;
-	aggref->aggkind = AGGKIND_NORMAL;
-	aggref->aggsplit = AGGSPLIT_SIMPLE;
-	aggref->location = -1;
-	/* construct the arguments */
-	agggregate_signature = format_procedure_qualified(inp->aggfnoid);
-	aggregate_signature_const = makeConst(TEXTOID,
-										  -1,
-										  DEFAULT_COLLATION_OID,
-										  -1,
-										  CStringGetTextDatum(agggregate_signature),
-										  false,
-										  false /* passbyval */
-	);
-	te = makeTargetEntry((Expr *) aggregate_signature_const, tlist_attno++, NULL, false);
-	tlist = lappend(tlist, te);
+// 	// elog(NOTICE, "Input Collation %d", inp->inputcollid);
 
-	if (OidIsValid(inp->inputcollid))
-	{
-		/* similar to generate_collation_name */
-		HeapTuple tp;
-		Form_pg_collation colltup;
-		tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(inp->inputcollid));
-		if (!HeapTupleIsValid(tp))
-			elog(ERROR, "cache lookup failed for collation %u", inp->inputcollid);
-		colltup = (Form_pg_collation) GETSTRUCT(tp);
-		collation_name = pstrdup(NameStr(colltup->collname));
-		collation_name_datum = DirectFunctionCall1(namein, CStringGetDatum(collation_name));
+// 	if (OidIsValid(inp->inputcollid))
+// 	{
+// 		/* similar to generate_collation_name */
+// 		HeapTuple tp;
+// 		Form_pg_collation colltup;
+// 		tp = SearchSysCache1(COLLOID, ObjectIdGetDatum(inp->inputcollid));
+// 		if (!HeapTupleIsValid(tp))
+// 			elog(ERROR, "cache lookup failed for collation %u", inp->inputcollid);
+// 		colltup = (Form_pg_collation) GETSTRUCT(tp);
+// 		collation_name = pstrdup(NameStr(colltup->collname));
+// 		collation_name_datum = DirectFunctionCall1(namein, CStringGetDatum(collation_name));
 
-		collation_schema_name = get_namespace_name(colltup->collnamespace);
-		if (collation_schema_name != NULL)
-			collation_schema_datum =
-				DirectFunctionCall1(namein, CStringGetDatum(collation_schema_name));
-		ReleaseSysCache(tp);
-	}
-	collation_schema_const = makeConst(NAMEOID,
-									   -1,
-									   InvalidOid,
-									   NAMEDATALEN,
-									   collation_schema_datum,
-									   (collation_schema_name == NULL) ? true : false,
-									   false /* passbyval */
-	);
-	te = makeTargetEntry((Expr *) collation_schema_const, tlist_attno++, NULL, false);
-	tlist = lappend(tlist, te);
+// 		collation_schema_name = get_namespace_name(colltup->collnamespace);
+// 		if (collation_schema_name != NULL)
+// 			collation_schema_datum =
+// 				DirectFunctionCall1(namein, CStringGetDatum(collation_schema_name));
+// 		ReleaseSysCache(tp);
+// 	}
+// 	collation_schema_const = makeConst(NAMEOID,
+// 									   -1,
+// 									   InvalidOid,
+// 									   NAMEDATALEN,
+// 									   collation_schema_datum,
+// 									   (collation_schema_name == NULL) ? true : false,
+// 									   false /* passbyval */
+// 	);
+// 	funcargs = lappend(funcargs, collation_schema_const);
 
-	collation_name_const = makeConst(NAMEOID,
-									 -1,
-									 InvalidOid,
-									 NAMEDATALEN,
-									 collation_name_datum,
-									 (collation_name == NULL) ? true : false,
-									 false /* passbyval */
-	);
-	te = makeTargetEntry((Expr *) collation_name_const, tlist_attno++, NULL, false);
-	tlist = lappend(tlist, te);
+// 	collation_name_const = makeConst(NAMEOID,
+// 									 -1,
+// 									 InvalidOid,
+// 									 NAMEDATALEN,
+// 									 collation_name_datum,
+// 									 (collation_name == NULL) ? true : false,
+// 									 false /* passbyval */
+// 	);
+// 	funcargs = lappend(funcargs, collation_name_const);
 
-	input_types_const = makeConst(get_array_type(NAMEOID),
-								  -1,
-								  InvalidOid,
-								  -1,
-								  get_input_types_array_datum(inp),
-								  false,
-								  false /* passbyval */
-	);
-	te = makeTargetEntry((Expr *) input_types_const, tlist_attno++, NULL, false);
-	tlist = lappend(tlist, te);
+// 	input_types_const = makeConst(get_array_type(NAMEOID),
+// 								  -1,
+// 								  InvalidOid,
+// 								  -1,
+// 								  get_input_types_array_datum(inp),
+// 								  false,
+// 								  false /* passbyval */
+// 	);
+// 	funcargs = lappend(funcargs, input_types_const);
 
-	partial_bytea_var = copyObject(partial_state_var);
-	te = makeTargetEntry((Expr *) partial_bytea_var, tlist_attno++, NULL, false);
-	tlist = lappend(tlist, te);
+// 	// @TODO: makeConst instead of copyObject
+// 	partial_bytea_var = copyObject(partial_state_var);
+// 	funcargs = lappend(funcargs, partial_bytea_var);
 
-	return_type_const = makeNullConst(inp->aggtype, -1, inp->aggcollid);
-	te = makeTargetEntry((Expr *) return_type_const, tlist_attno++, NULL, false);
-	tlist = lappend(tlist, te);
+// 	return_type_const = makeNullConst(inp->aggtype, -1, inp->aggcollid);
+// 	funcargs = lappend(funcargs, return_type_const);
 
-	Assert(tlist_attno == 7);
-	aggref->args = tlist;
-	return aggref;
-}
+// 	finalize_partial =
+// 		makeFuncExpr(finalfnoid,
+// 					 inp->aggtype,
+// 					 funcargs,
+// 					 inp->aggcollid,
+// 					 inp->inputcollid,
+// 					 COERCE_EXPLICIT_CALL);
+
+// 	return finalize_partial;
+// }
+
 
 /* creates a partialize expr for the passed in agg:
  * partialize_agg( agg)
  */
-static FuncExpr *
-get_partialize_funcexpr(Aggref *agg)
-{
-	FuncExpr *partialize_fnexpr;
-	Oid partfnoid, partargtype;
-	partargtype = ANYELEMENTOID;
-	partfnoid = LookupFuncName(list_make2(makeString(INTERNAL_SCHEMA_NAME), makeString(PARTIALFN)),
-							   1,
-							   &partargtype,
-							   false);
-	partialize_fnexpr = makeFuncExpr(partfnoid,
-									 BYTEAOID,
-									 list_make1(agg), /*args*/
-									 InvalidOid,
-									 InvalidOid,
-									 COERCE_EXPLICIT_CALL);
-	return partialize_fnexpr;
-}
+// static FuncExpr *
+// get_partialize_funcexpr(Aggref *agg)
+// {
+// 	FuncExpr *partialize_fnexpr;
+// 	Oid partfnoid, partargtype;
+// 	partargtype = ANYELEMENTOID;
+// 	partfnoid = LookupFuncName(list_make2(makeString(INTERNAL_SCHEMA_NAME), makeString(PARTIALFN)),
+// 							   1,
+// 							   &partargtype,
+// 							   false);
+// 	partialize_fnexpr = makeFuncExpr(partfnoid,
+// 									 BYTEAOID,
+// 									 list_make1(agg), /*args*/
+// 									 InvalidOid,
+// 									 InvalidOid,
+// 									 COERCE_EXPLICIT_CALL);
+// 	return partialize_fnexpr;
+// }
 
 /*
  * Check if the supplied OID belongs to a valid bucket function
@@ -1443,7 +1425,7 @@ mattablecolumninfo_init(MatTableColumnInfo *matcolinfo, List *collist, List *tli
 /*
  * Add Information required to create and populate the materialization table
  * columns
- * a ) create a columndef for the materialization table
+ * a) create a columndef for the materialization table
  * b) create the corresponding expr to populate the column of the materialization table (e..g for a
  * column that is an aggref, we create a partialize_agg expr to populate the column Returns: the Var
  * corresponding to the newly created column of the materialization table
@@ -1474,14 +1456,15 @@ mattablecolumninfo_addentry(MatTableColumnInfo *out, Node *input, int original_q
 	{
 		case T_Aggref:
 		{
-			FuncExpr *fexpr = get_partialize_funcexpr((Aggref *) input);
+			//FuncExpr *fexpr = get_partialize_funcexpr((Aggref *) input);
+			Aggref *agg = (Aggref *) input;
 			PRINT_MATCOLNAME(colbuf, "agg", original_query_resno, matcolno);
 			colname = colbuf;
-			coltype = BYTEAOID;
+			coltype = agg->aggtype;
 			coltypmod = -1;
-			colcollation = InvalidOid;
+			colcollation = agg->aggcollid;
 			col = makeColumnDef(colname, coltype, coltypmod, colcollation);
-			part_te = makeTargetEntry((Expr *) fexpr, matcolno, pstrdup(colname), false);
+			part_te = makeTargetEntry((Expr *) input, matcolno, pstrdup(colname), false);
 		}
 		break;
 		case T_TargetEntry:
@@ -1520,7 +1503,7 @@ mattablecolumninfo_addentry(MatTableColumnInfo *out, Node *input, int original_q
 			colcollation = exprCollation((Node *) tle->expr);
 			col = makeColumnDef(colname, coltype, coltypmod, colcollation);
 			part_te = (TargetEntry *) copyObject(input);
-			/*need to project all the partial entries so that materialization table is filled */
+			/* need to project all the partial entries so that materialization table is filled */
 			part_te->resjunk = false;
 			part_te->resno = matcolno;
 
@@ -1547,45 +1530,53 @@ mattablecolumninfo_addentry(MatTableColumnInfo *out, Node *input, int original_q
 	return var;
 }
 
-static Aggref *
-add_partialize_column(Aggref *agg_to_partialize, AggPartCxt *cxt)
-{
-	Aggref *newagg;
-	Var *var;
-	/* step 1: create partialize( aggref) column
-	 * for materialization table */
-	var = mattablecolumninfo_addentry(cxt->mattblinfo,
-									  (Node *) agg_to_partialize,
-									  cxt->original_query_resno);
-	cxt->addcol = true;
-	/* step 2: create finalize_agg expr using var
-	 * for the clumn added to the materialization table
-	 */
-	/* This is a var for the column we created */
-	newagg = get_finalize_aggref(agg_to_partialize, var);
-	return newagg;
-}
+// static Var *
+// add_partialize_column(Aggref *agg_to_partialize, AggPartCxt *cxt)
+// {
+// 	// FuncExpr *newfn;
+// 	Var *var;
+
+// 	/*
+// 	 * step 1: create partialize(aggref) column
+// 	 * for materialization table
+// 	 */
+// 	var = mattablecolumninfo_addentry(cxt->mattblinfo,
+// 									  (Node *) agg_to_partialize,
+// 									  cxt->original_query_resno);
+// 	cxt->addcol = true;
+
+// 	/*
+// 	 * step 2: create finalize_partial expr using var
+// 	 * for the column added to the materialization table
+// 	 */
+// 	// newfn = get_finalize_partial_funcexpr(agg_to_partialize, var);
+
+// 	return var;
+// }
 
 static Node *
 add_aggregate_partialize_mutator(Node *node, AggPartCxt *cxt)
 {
 	if (node == NULL)
 		return NULL;
-	/* modify the aggref and create a partialize(aggref) expr
+
+	/*
+	 * Modify the aggref and create a partialize(aggref) expr
 	 * for the materialization.
-	 * Add a corresponding  columndef for the mat table.
+	 * Add a corresponding columndef for the mat table.
 	 * Replace the aggref with the ts_internal_cagg_final fn.
 	 * using a Var for the corresponding column in the mat table.
 	 * All new Vars have varno = 1 (for RTE 1)
 	 */
-	if (IsA(node, Aggref))
-	{
-		if (cxt->ignore_aggoid == ((Aggref *) node)->aggfnoid)
-			return node; /*don't process this further */
+	// if (IsA(node, Aggref))
+	// {
+	// 	if (cxt->ignore_aggoid == ((Aggref *) node)->aggfnoid)
+	// 		return node; /*don't process this further */
 
-		Aggref *newagg = add_partialize_column((Aggref *) node, cxt);
-		return (Node *) newagg;
-	}
+	// 	// FuncExpr *newfn = add_partialize_column((Aggref *) node, cxt);
+	// 	Var *newfn = add_partialize_column((Aggref *) node, cxt);
+	// 	return (Node *) newfn;
+	// }
 	return expression_tree_mutator(node, add_aggregate_partialize_mutator, cxt);
 }
 
@@ -1596,12 +1587,16 @@ typedef struct Cagg_havingcxt
 	AggPartCxt agg_cxt;
 } cagg_havingcxt;
 
-/* This function modifies the passed in havingQual by mapping exprs to
+/*
+ * This function modifies the passed in havingQual by mapping exprs to
  * columns in materialization table or finalized aggregate form.
+ *
  * Note that HAVING clause can contain only exprs from group-by or aggregates
  * and GROUP BY clauses cannot be aggregates.
+ *
  * (By the time we process havingQuals, all the group by exprs have been
  * processed and have associated columns in the materialization hypertable).
+ *
  * Example, if  the original query has
  * GROUP BY  colA + colB, colC
  *   HAVING colA + colB + sum(colD) > 10 OR count(colE) = 10
@@ -1609,7 +1604,6 @@ typedef struct Cagg_havingcxt
  * The transformed havingqual would be
  * HAVING   matCol3 + finalize_agg( sum(matCol4) > 10
  *       OR finalize_agg( count(matCol5)) = 10
- *
  *
  * Note: GROUP BY exprs always appear in the query's targetlist.
  * Some of the aggregates from the havingQual  might also already appear in the targetlist.
@@ -1619,69 +1613,96 @@ typedef struct Cagg_havingcxt
  * transformed havingQual.
  */
 static Node *
-create_replace_having_qual_mutator(Node *node, cagg_havingcxt *cxt)
+// create_replace_having_qual_mutator(Node *node, cagg_havingcxt *cxt)
+create_replace_having_qual_mutator(Node *node)
 {
 	if (node == NULL)
 		return NULL;
-	/* See if we already have a column in materialization hypertable for this
+
+	/*
+	 * See if we already have a column in materialization hypertable for this
 	 * expr. We do this by checking the existing targetlist
 	 * entries for the query.
 	 */
-	ListCell *lc, *lc2;
-	List *origtlist = cxt->origq_tlist;
-	List *modtlist = cxt->finalizeq_tlist;
-	forboth (lc, origtlist, lc2, modtlist)
-	{
-		TargetEntry *te = (TargetEntry *) lfirst(lc);
-		TargetEntry *modte = (TargetEntry *) lfirst(lc2);
-		if (equal(node, te->expr))
-		{
-			return (Node *) modte->expr;
-		}
-	}
-	/* didn't find a match in targetlist. If it is an aggregate, create a partialize column for
-	 * it in materialization hypertable and return corresponding finalize
+	// ListCell *lc, *lc2;
+	// List *origtlist = cxt->origq_tlist;
+	// List *modtlist = cxt->finalizeq_tlist;
+
+	// forboth (lc, origtlist, lc2, modtlist)
+	// {
+	// 	TargetEntry *te = (TargetEntry *) lfirst(lc);
+	// 	TargetEntry *modte = (TargetEntry *) lfirst(lc2);
+	// 	if (equal(node, te->expr))
+	// 	{
+	// 		return (Node *) modte->expr;
+	// 	}
+	// }
+
+	/*
+	 * Didn't find a match in targetlist. If it is an aggregate, create a partialize
+	 * column for it in materialization hypertable and return corresponding finalize
 	 * expr.
 	 */
-	if (IsA(node, Aggref))
-	{
-		AggPartCxt *agg_cxt = &(cxt->agg_cxt);
-		agg_cxt->addcol = false;
-		Aggref *newagg = add_partialize_column((Aggref *) node, agg_cxt);
-		Assert(agg_cxt->addcol == true);
-		return (Node *) newagg;
-	}
-	return expression_tree_mutator(node, create_replace_having_qual_mutator, cxt);
+	// if (IsA(node, Aggref))
+	// {
+	// 	Aggref *agg = (Aggref *) node;
+	// 	ColumnDef col;
+	// 	TargetEntry te;
+	// 	col = makeColumnDef(agg->, coltype, coltypmod, colcollation);
+	// 	te = makeTargetEntry((Expr *) input, matcolno, pstrdup(colname), false);
+	// 	return (Node *) var;
+	// }
+	//return expression_tree_mutator(node, create_replace_having_qual_mutator, cxt);
+	return expression_tree_mutator(node, create_replace_having_qual_mutator, NULL);
 }
 
+// static Node *
+// finalizequery_create_havingqual(FinalizeQueryInfo *inp, MatTableColumnInfo *mattblinfo)
+// {
+// 	Query *orig_query = inp->final_userquery;
+
+// 	if (orig_query->havingQual == NULL)
+// 		return NULL;
+
+// 	Node *havingQual = copyObject(orig_query->havingQual);
+
+// 	// elog(NOTICE, "havingQual %s", nodeToString(havingQual));
+
+// 	Assert(inp->final_seltlist != NULL);
+// 	cagg_havingcxt hcxt = { .origq_tlist = orig_query->targetList,
+// 							.finalizeq_tlist = inp->final_seltlist,
+// 							.agg_cxt.mattblinfo = mattblinfo,
+// 							.agg_cxt.original_query_resno = 0,
+// 							.agg_cxt.ignore_aggoid = get_finalizefnoid(),
+// 							.agg_cxt.addcol = false };
+
+// 	return create_replace_having_qual_mutator(havingQual, &hcxt);
+// }
+
 static Node *
-finalizequery_create_havingqual(FinalizeQueryInfo *inp, MatTableColumnInfo *mattblinfo)
+finalizequery_create_qual(FinalizeQueryInfo *inp)
 {
 	Query *orig_query = inp->final_userquery;
+
 	if (orig_query->havingQual == NULL)
-		return NULL;
+ 		return NULL;
+
 	Node *havingQual = copyObject(orig_query->havingQual);
-	Assert(inp->final_seltlist != NULL);
-	cagg_havingcxt hcxt = { .origq_tlist = orig_query->targetList,
-							.finalizeq_tlist = inp->final_seltlist,
-							.agg_cxt.mattblinfo = mattblinfo,
-							.agg_cxt.original_query_resno = 0,
-							.agg_cxt.ignore_aggoid = get_finalizefnoid(),
-							.agg_cxt.addcol = false };
-	return create_replace_having_qual_mutator(havingQual, &hcxt);
+
+	return create_replace_having_qual_mutator(havingQual);
 }
 
 /*
-Init the finalize query data structure.
-Parameters:
-orig_query - the original query from user view that is being used as template for the finalize query
-tlist_aliases - aliases for the view select list
-materialization table columns are created . This will be returned in  the mattblinfo
-
-DO NOT modify orig_query. Make a copy if needed.
-SIDE_EFFCT: the data structure in mattblinfo is modified as a side effect by adding new materialize
-table columns and partialize exprs.
-*/
+ * Init the finalize query data structure.
+ * Parameters:
+ * orig_query - the original query from user view that is being used as template for the finalize query
+ * tlist_aliases - aliases for the view select list
+ * materialization table columns are created . This will be returned in  the mattblinfo
+ *
+ * DO NOT modify orig_query. Make a copy if needed.
+ * SIDE_EFFCT: the data structure in mattblinfo is modified as a side effect by adding new materialize
+ * table columns and partialize exprs.
+ */
 static void
 finalizequery_init(FinalizeQueryInfo *inp, Query *orig_query, MatTableColumnInfo *mattblinfo)
 {
@@ -1697,25 +1718,38 @@ finalizequery_init(FinalizeQueryInfo *inp, Query *orig_query, MatTableColumnInfo
 	cxt.mattblinfo = mattblinfo;
 	cxt.ignore_aggoid = InvalidOid;
 
-	/* We want all the entries in the targetlist (resjunk or not)
-	 * in the materialization  table defintion so we include group-by/having clause etc.
-	 * We have to do 3 things here: 1) create a column for mat table , 2) partialize_expr to
-	 * populate it and 3) modify the target entry to be a finalize_expr that selects from the
-	 * materialization table
+	/*
+	 * We want all the entries in the targetlist (resjunk or not)
+	 * in the materialization table defintion so we include group-by/having clause etc.
+	 *
+	 * We have to do 3 things here:
+	 *  1) create a column for mat table
+	 *  2) partialize_expr to populate it
+	 *  3) modify the target entry to be a finalize_expr that selects from the
+	 *     materialization table
 	 */
 	foreach (lc, orig_query->targetList)
 	{
 		TargetEntry *tle = (TargetEntry *) lfirst(lc);
 		TargetEntry *modte = copyObject(tle);
+
 		cxt.addcol = false;
 		cxt.original_query_resno = resno;
+
+		// elog(NOTICE, "\n");
+		// elog(NOTICE, "BEFORE %s", nodeToString(modte));
+
 		/* if tle has aggrefs , get the corresponding
 		 * finalize_agg expression and save it in modte
 		 * also add correspong materialization table column info
 		 * for the aggrefs in tle. */
-		modte = (TargetEntry *) expression_tree_mutator((Node *) modte,
-														add_aggregate_partialize_mutator,
-														&cxt);
+		// modte = (TargetEntry *) expression_tree_mutator((Node *) modte,
+		// 												add_aggregate_partialize_mutator,
+		// 												&cxt);
+		// elog(NOTICE, "\n");
+		// elog(NOTICE, "AFTER %s", nodeToString(modte));
+		modte->ressortgroupref = 0;
+
 		/* We need columns for non-aggregate targets
 		 * if it is not a resjunk OR appears in the grouping clause
 		 */
@@ -1727,6 +1761,7 @@ finalizequery_init(FinalizeQueryInfo *inp, Query *orig_query, MatTableColumnInfo
 			/* fix the expression for the target entry */
 			modte->expr = (Expr *) var;
 		}
+
 		/* Construct the targetlist for the query on the
 		 * materialization table. The TL maps 1-1 with the original
 		 * query:
@@ -1749,9 +1784,13 @@ finalizequery_init(FinalizeQueryInfo *inp, Query *orig_query, MatTableColumnInfo
 		}
 		inp->final_seltlist = lappend(inp->final_seltlist, modte);
 	}
+
 	/* all grouping clause elements are in targetlist already.
 	   so let's check the having clause */
-	inp->final_havingqual = finalizequery_create_havingqual(inp, mattblinfo);
+	//inp->final_havingqual = finalizequery_create_havingqual(inp, mattblinfo);
+	inp->final_havingqual = finalizequery_create_qual(inp);
+
+	// elog(NOTICE, "final_havingqual %s", nodeToString(inp->final_havingqual));
 }
 
 /* Create select query with the finalize aggregates
@@ -1765,6 +1804,7 @@ finalizequery_get_select_query(FinalizeQueryInfo *inp, List *matcollist,
 {
 	Query *final_selquery = NULL;
 	ListCell *lc;
+
 	/*
 	 * for initial cagg creation rtable will have only 1 entry,
 	 * for alter table rtable will have multiple entries with our
@@ -1778,6 +1818,7 @@ finalizequery_get_select_query(FinalizeQueryInfo *inp, List *matcollist,
 	rte->tablesample = NULL;
 	rte->eref->colnames = NIL;
 	rte->selectedCols = NULL;
+
 	/* aliases for column names for the materialization table*/
 	foreach (lc, matcollist)
 	{
@@ -1803,19 +1844,30 @@ finalizequery_get_select_query(FinalizeQueryInfo *inp, List *matcollist,
 	}
 
 	CAGG_MAKEQUERY(final_selquery, inp->final_userquery);
-	final_selquery->rtable = inp->final_userquery->rtable; /*fixed up above */
-	/* fixup from list. No quals on original table should be
+	final_selquery->hasAggs = false;
+	final_selquery->rtable = inp->final_userquery->rtable; /* fixed up above */
+
+	/*
+	 * fixup from list. No quals on original table should be
 	 * present here - they should be on the query that populates the mattable (partial_selquery)
 	 */
 	Assert(list_length(inp->final_userquery->jointree->fromlist) == 1);
 	fromexpr = inp->final_userquery->jointree;
-	fromexpr->quals = NULL;
+
+	// elog(NOTICE, "userQueryQual %s", nodeToString(inp->final_userquery->jointree->quals));
+	// elog(NOTICE, "finalHavingQual %s", nodeToString(inp->final_havingqual));
+
+	//fromexpr->quals = NULL;
 	final_selquery->jointree = fromexpr;
 	final_selquery->targetList = inp->final_seltlist;
-	final_selquery->groupClause = inp->final_userquery->groupClause;
 	final_selquery->sortClause = inp->final_userquery->sortClause;
-	/* copy the having clause too */
-	final_selquery->havingQual = inp->final_havingqual;
+
+	/* copy the having clause to the where clause */
+	Node *new_qual = make_and_qual(inp->final_userquery->jointree->quals, inp->final_havingqual);
+
+	// elog(NOTICE, "newQual %s", nodeToString(new_qual));
+
+	final_selquery->jointree->quals = new_qual;
 
 	return final_selquery;
 }
@@ -1934,7 +1986,9 @@ cagg_create(const CreateTableAsStmt *create_stmt, ViewStmt *stmt, Query *panquer
 	 */
 	stmt->options = NULL;
 
-	/* Step 1: create the materialization table */
+	/*
+	 * Step 1: create the materialization table
+	 */
 	ts_catalog_database_info_become_owner(ts_catalog_database_info_get(), &sec_ctx);
 	materialize_hypertable_id = ts_catalog_table_next_seq_id(ts_catalog_get(), HYPERTABLE);
 	ts_catalog_restore_user(&sec_ctx);
@@ -1949,8 +2003,8 @@ cagg_create(const CreateTableAsStmt *create_stmt, ViewStmt *stmt, Query *panquer
 													create_stmt->into->tableSpaceName,
 													create_stmt->into->accessMethod,
 													&mataddress);
-	/* Step 2: create view with select finalize from materialization
-	 * table
+	/*
+	 * Step 2: create view with select finalize from materialization table
 	 */
 	final_selquery =
 		finalizequery_get_select_query(&finalqinfo, mattblinfo.matcollist, &mataddress);
@@ -1964,7 +2018,10 @@ cagg_create(const CreateTableAsStmt *create_stmt, ViewStmt *stmt, Query *panquer
 
 	create_view_for_query(final_selquery, stmt->view);
 
-	/* Step 3: create the internal view with select partialize(..)
+	// elog(NOTICE, "final_selquery %s", nodeToString(final_selquery));
+
+	/*
+	 * Step 3: create the internal view with select partialize(..)
 	 */
 	partial_selquery = mattablecolumninfo_get_partial_select_query(&mattblinfo, panquery);
 
@@ -1992,7 +2049,8 @@ cagg_create(const CreateTableAsStmt *create_stmt, ViewStmt *stmt, Query *panquer
 							  origquery_ht->bucket_width,
 							  materialized_only,
 							  dum_rel->schemaname,
-							  dum_rel->relname);
+							  dum_rel->relname,
+							  CONTINUOUS_AGG_VERSION_1);
 
 	if (origquery_ht->bucket_width == BUCKET_WIDTH_VARIABLE)
 	{

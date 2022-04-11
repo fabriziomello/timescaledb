@@ -63,7 +63,7 @@ WHERE user_view_name = 'mat_m1'
 \gset
 
 insert into :"MAT_SCHEMA_NAME".:"MAT_TABLE_NAME"
-select a, _timescaledb_internal.partialize_agg(count(b)),
+select a, count(b),
 time_bucket(1, a)
 from foo
 group by time_bucket(1, a) , a ;
@@ -128,7 +128,7 @@ FROM timescaledb_information.hypertables ORDER BY 1,2;
 SET ROLE :ROLE_SUPERUSER;
 insert into  :"MAT_SCHEMA_NAME".:"MAT_TABLE_NAME"
 select
- time_bucket('1day', timec), _timescaledb_internal.partialize_agg( min(location)), _timescaledb_internal.partialize_agg( sum(temperature)) , _timescaledb_internal.partialize_agg( sum(humidity))
+ time_bucket('1day', timec), min(location), sum(temperature), sum(humidity)
 from conditions
 group by time_bucket('1day', timec) ;
 
@@ -191,7 +191,7 @@ WHERE user_view_name = 'mat_m1'
 SET ROLE :ROLE_SUPERUSER;
 insert into  :"MAT_SCHEMA_NAME".:"MAT_TABLE_NAME"
 select
- time_bucket('1week', timec),  _timescaledb_internal.partialize_agg( min(location)), _timescaledb_internal.partialize_agg( sum(temperature)) , _timescaledb_internal.partialize_agg( sum(humidity)), _timescaledb_internal.partialize_agg(stddev(humidity))
+ time_bucket('1week', timec), min(location), sum(temperature) + sum(humidity), stddev(humidity)
 from conditions
 group by time_bucket('1week', timec) ;
 SET ROLE :ROLE_DEFAULT_PERM_USER;
@@ -237,7 +237,7 @@ WHERE user_view_name = 'mat_m1'
 SET ROLE :ROLE_SUPERUSER;
 insert into  :"MAT_SCHEMA_NAME".:"MAT_TABLE_NAME"
 select
- time_bucket('1week', timec),  _timescaledb_internal.partialize_agg( min(location)), _timescaledb_internal.partialize_agg( sum(temperature)) , _timescaledb_internal.partialize_agg( sum(humidity)), _timescaledb_internal.partialize_agg(stddev(humidity))
+ time_bucket('1week', timec), min(location), sum(temperature)+sum(humidity), stddev(humidity)
 from conditions
 where location = 'NYC'
 group by time_bucket('1week', timec) ;
@@ -282,7 +282,7 @@ WHERE user_view_name = 'mat_m1'
 SET ROLE :ROLE_SUPERUSER;
 insert into  :"MAT_SCHEMA_NAME".:"MAT_TABLE_NAME"
 select
- time_bucket('1week', timec),  _timescaledb_internal.partialize_agg( min(location)), _timescaledb_internal.partialize_agg( sum(temperature)) , _timescaledb_internal.partialize_agg( sum(humidity)), _timescaledb_internal.partialize_agg(stddev(humidity))
+ time_bucket('1week', timec), min(location), sum(temperature)+sum(humidity), stddev(humidity)
 from conditions
 group by time_bucket('1week', timec) ;
 SET ROLE :ROLE_DEFAULT_PERM_USER;
@@ -427,8 +427,7 @@ order by attnum, attname;
 SET ROLE :ROLE_SUPERUSER;
 insert into  :"MAT_SCHEMA_NAME".:"MAT_TABLE_NAME"
 select
- time_bucket('1week', timec),  _timescaledb_internal.partialize_agg( min(location)), _timescaledb_internal.partialize_agg( sum(temperature)) , _timescaledb_internal.partialize_agg( sum(humidity)), _timescaledb_internal.partialize_agg(stddev(humidity))
-,_timescaledb_internal.partialize_agg( avg(temperature))
+ time_bucket('1week', timec), min(location), sum(temperature)+sum(humidity), avg(temperature)
 from conditions
 group by time_bucket('1week', timec) ;
 SET ROLE :ROLE_DEFAULT_PERM_USER;
@@ -844,7 +843,7 @@ select time_bucket(100, timec), aggregate_to_test_ffunc_extra(timec, 1, 3, 'test
 from conditions
 group by time_bucket(100, timec);
 
-SELECT * FROM mat_ffunc_test;
+SELECT * FROM mat_ffunc_test ORDER BY time_bucket;
 
 DROP MATERIALIZED view mat_ffunc_test;
 
@@ -855,7 +854,7 @@ select time_bucket(100, timec), aggregate_to_test_ffunc_extra(timec, 4, 5, bigin
 from conditions
 group by time_bucket(100, timec);
 
-SELECT * FROM mat_ffunc_test;
+SELECT * FROM mat_ffunc_test ORDER BY time_bucket;
 
 --refresh mat view test when time_bucket is not projected --
 DROP MATERIALIZED VIEW mat_ffunc_test;
