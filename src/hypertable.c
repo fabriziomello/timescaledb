@@ -2933,7 +2933,7 @@ ts_hypertable_get_open_dim_max_value(const Hypertable *ht, int dimension_index, 
 	if (SPI_connect() != SPI_OK_CONNECT)
 		elog(ERROR, "could not connect to SPI");
 
-	res = SPI_execute(command->data, true /* read_only */, 0 /*count*/);
+	res = SPI_execute(command->data, false /* read_only */, 0 /*count*/);
 
 	if (res < 0)
 		ereport(ERROR,

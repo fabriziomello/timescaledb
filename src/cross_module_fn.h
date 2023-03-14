@@ -116,6 +116,8 @@ typedef struct CrossModuleFunctions
 											 int64 start, int64 end);
 	void (*continuous_agg_update_options)(ContinuousAgg *cagg,
 										  WithClauseResult *with_clause_options);
+	int64 (*continuous_agg_invalidation_threshold_get)(int32 mat_hypertable_id);
+	void (*continuous_agg_invalidation_threshold_force_update)(int32 mat_hypertable_id);
 	PGFunction invalidation_cagg_log_add_entry;
 	PGFunction invalidation_hyper_log_add_entry;
 	void (*remote_invalidation_log_delete)(int32 raw_hypertable_id,

@@ -11,11 +11,14 @@
 typedef struct InternalTimeRange InternalTimeRange;
 typedef struct ContinuousAgg ContinuousAgg;
 
+extern void invalidation_threshold_force_update(int32 hypertable_id);
 extern int64 invalidation_threshold_get(int32 hypertable_id);
 extern int64 invalidation_threshold_set_or_get(int32 raw_hypertable_id,
-											   int64 invalidation_threshold);
+											   int64 invalidation_threshold, bool force_update);
 extern void invalidation_threshold_lock(int32 raw_hypertable_id);
-extern int64 invalidation_threshold_compute(const ContinuousAgg *cagg,
-											const InternalTimeRange *refresh_window);
+extern int64 invalidation_threshold_compute_raw_ht(const ContinuousAgg *cagg,
+												   const InternalTimeRange *refresh_window);
+extern int64 invalidation_threshold_compute_mat_ht(const ContinuousAgg *cagg,
+												   const InternalTimeRange *refresh_window);
 
 #endif /* TIMESCALEDB_TSL_CONTINUOUS_AGGS_INVALIDATION_THRESHOLD_H */

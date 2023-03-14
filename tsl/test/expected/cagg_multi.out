@@ -85,21 +85,25 @@ select * from cagg_2 order by 1,2;
     16 |  -4 |     23
 (5 rows)
 
-SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold;
+SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold ORDER BY 1;
  hypertable_id | watermark 
 ---------------+-----------
              1 |        18
-(1 row)
+             2 |        18
+             3 |        18
+(3 rows)
 
 --TEST2: cagg_2 gets invalidations after cagg_1's refresh
 --will trigger invalidations
 INSERT INTO continuous_agg_test VALUES
     (10, -4, 10), (11, - 3, 50), (11, - 3, 70), (10, - 4, 10);
-SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold;
+SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold ORDER BY 1;
  hypertable_id | watermark 
 ---------------+-----------
              1 |        18
-(1 row)
+             2 |        18
+             3 |        18
+(3 rows)
 
 CALL refresh_continuous_aggregate('cagg_1', NULL, NULL);
 select * from cagg_1 order by 1;
@@ -297,7 +301,9 @@ select * from _timescaledb_catalog.continuous_aggs_invalidation_threshold order 
  hypertable_id | watermark 
 ---------------+-----------
              4 |        18
-(1 row)
+             5 |        18
+             6 |        14
+(3 rows)
 
 select * from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log order by 1;
  materialization_id | lowest_modified_value | greatest_modified_value 

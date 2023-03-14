@@ -264,9 +264,12 @@ CREATE VIEW cagg_invals AS SELECT * FROM get_cagg_invals();
 -- set:
 SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold
 ORDER BY 1,2;
- hypertable_id | watermark 
----------------+-----------
-(0 rows)
+ hypertable_id |      watermark       
+---------------+----------------------
+             3 | -9223372036854775808
+             4 | -9223372036854775808
+             5 |          -2147483648
+(3 rows)
 
 -- There should be only "infinite" invalidations in the cagg
 -- invalidation log:
@@ -282,10 +285,13 @@ SELECT * FROM cagg_invals;
 CALL refresh_continuous_aggregate('cond_10', 1, 50);
 SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold
 ORDER BY 1,2;
- hypertable_id | watermark 
----------------+-----------
-             1 |        50
-(1 row)
+ hypertable_id |      watermark       
+---------------+----------------------
+             1 |                   50
+             3 |                   50
+             4 | -9223372036854775808
+             5 |          -2147483648
+(4 rows)
 
 -- Invalidations should be cleared inside the refresh window:
 SELECT * FROM cagg_invals;
@@ -313,10 +319,13 @@ CALL refresh_continuous_aggregate('cond_10', 20, 49);
 psql:include/cagg_invalidation_common.sql:207: NOTICE:  continuous aggregate "cond_10" is already up-to-date
 SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold
 ORDER BY 1,2;
- hypertable_id | watermark 
----------------+-----------
-             1 |        50
-(1 row)
+ hypertable_id |      watermark       
+---------------+----------------------
+             1 |                   50
+             3 |                   50
+             4 | -9223372036854775808
+             5 |          -2147483648
+(4 rows)
 
 -- Nothing changes with invalidations either since the region was
 -- already refreshed and no new invalidations have been generated:
@@ -333,11 +342,14 @@ SELECT * FROM cagg_invals;
 CALL refresh_continuous_aggregate('measure_10', 0, 30);
 SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold
 ORDER BY 1,2;
- hypertable_id | watermark 
----------------+-----------
-             1 |        50
-             2 |        30
-(2 rows)
+ hypertable_id |      watermark       
+---------------+----------------------
+             1 |                   50
+             2 |                   30
+             3 |                   50
+             4 | -9223372036854775808
+             5 |                   30
+(5 rows)
 
 SELECT * FROM cagg_invals;
  cagg_id |        start         |         end         
@@ -358,7 +370,10 @@ ORDER BY 1,2;
 ---------------+-----------
              1 |       100
              2 |        30
-(2 rows)
+             3 |        50
+             4 |       100
+             5 |        30
+(5 rows)
 
 SELECT * FROM cagg_invals;
  cagg_id |        start         |         end         
@@ -434,7 +449,10 @@ ORDER BY 1,2;
 ---------------+-----------
              1 |       100
              2 |        30
-(2 rows)
+             3 |        60
+             4 |       100
+             5 |        30
+(5 rows)
 
 -- Invalidations should be moved from the hypertable invalidation log
 -- to the continuous aggregate log, but only for the hypertable that

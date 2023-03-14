@@ -249,7 +249,8 @@ step "S1_select"
     SELECT h.table_name AS hypertable, it.watermark AS threshold
     FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold it,
     _timescaledb_catalog.hypertable h
-    WHERE it.hypertable_id = h.id;
+    WHERE it.hypertable_id = h.id
+    AND h.table_name = 'conditions';
 }
 
 ####################################################################

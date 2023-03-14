@@ -706,12 +706,13 @@ continuous_agg_refresh_internal(const ContinuousAgg *cagg,
 								const bool end_isnull)
 {
 	Catalog *catalog = ts_catalog_get();
-	int32 mat_id = cagg->data.mat_hypertable_id;
+	// int32 mat_id = cagg->data.mat_hypertable_id;
 	InternalTimeRange refresh_window = *refresh_window_arg;
 	int64 computed_invalidation_threshold;
 	int64 invalidation_threshold;
 	bool is_raw_ht_distributed;
 	int rc;
+	MemoryContext mctx = CurrentMemoryContext;
 
 	/* Connect to SPI manager due to the underlying SPI calls */
 	if ((rc = SPI_connect_ext(SPI_OPT_NONATOMIC) != SPI_OK_CONNECT))
@@ -773,7 +774,8 @@ continuous_agg_refresh_internal(const ContinuousAgg *cagg,
 					   &refresh_window,
 					   "refreshing continuous aggregate");
 
-	/* Perform the refresh across two transactions.
+	/*
+	 * Perform the refresh across two transactions.
 	 *
 	 * The first transaction moves the invalidation threshold (if needed) and
 	 * copies over invalidations from the hypertable log to the cagg
@@ -795,13 +797,14 @@ continuous_agg_refresh_internal(const ContinuousAgg *cagg,
 	/* Compute new invalidation threshold. Note that this computation caps the
 	 * threshold at the end of the last bucket that holds data in the
 	 * underlying hypertable. */
-	computed_invalidation_threshold = invalidation_threshold_compute(cagg, &refresh_window);
+	computed_invalidation_threshold = invalidation_threshold_compute_raw_ht(cagg, &refresh_window);
 
 	/* Set the new invalidation threshold. Note that this only updates the
 	 * threshold if the new value is greater than the old one. Otherwise, the
 	 * existing threshold is returned. */
 	invalidation_threshold = invalidation_threshold_set_or_get(cagg->data.raw_hypertable_id,
-															   computed_invalidation_threshold);
+															   computed_invalidation_threshold,
+															   false);
 
 	/* We must also cap the refresh window at the invalidation threshold. If
 	 * we process invalidations after the threshold, the continuous aggregates
@@ -816,6 +819,9 @@ continuous_agg_refresh_internal(const ContinuousAgg *cagg,
 	if (refresh_window.start >= refresh_window.end)
 	{
 		emit_up_to_date_notice(cagg, callctx);
+
+		/* force compute and set the thresold for the materialization hypertable */
+		invalidation_threshold_force_update(cagg->data.mat_hypertable_id);
 
 		if ((rc = SPI_finish()) != SPI_OK_FINISH)
 			elog(ERROR, "SPI_finish failed: %s", SPI_result_code_string(rc));
@@ -844,10 +850,13 @@ continuous_agg_refresh_internal(const ContinuousAgg *cagg,
 	/* Commit and Start a new transaction */
 	SPI_commit_and_chain();
 
-	cagg = ts_continuous_agg_find_by_mat_hypertable_id(mat_id);
+	MemoryContextSwitchTo(mctx);
 
 	if (!process_cagg_invalidations_and_refresh(cagg, &refresh_window, callctx, INVALID_CHUNK_ID))
 		emit_up_to_date_notice(cagg, callctx);
+
+	/* force compute and set the thresold for the materialization hypertable */
+	invalidation_threshold_force_update(cagg->data.mat_hypertable_id);
 
 	if ((rc = SPI_finish()) != SPI_OK_FINISH)
 		elog(ERROR, "SPI_finish failed: %s", SPI_result_code_string(rc));

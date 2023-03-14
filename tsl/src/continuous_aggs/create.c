@@ -68,6 +68,7 @@
 #include "hypertable_cache.h"
 #include "hypertable.h"
 #include "invalidation.h"
+#include "invalidation_threshold.h"
 #include "dimension.h"
 #include "ts_catalog/continuous_agg.h"
 #include "options.h"
@@ -2822,16 +2823,14 @@ tsl_process_continuous_agg_viewstmt(Node *node, const char *query_string, void *
 											  stmt->into->rel->relname);
 	cagg_create(stmt, &viewstmt, (Query *) stmt->query, &timebucket_exprinfo, with_clause_options);
 
+	CommandCounterIncrement();
+
+	Oid relid = get_relname_relid(stmt->into->rel->relname, nspid);
+	ContinuousAgg *cagg = ts_continuous_agg_find_by_relid(relid);
+	Assert(cagg != NULL);
+
 	if (!stmt->into->skipData)
 	{
-		Oid relid;
-		ContinuousAgg *cagg;
-		InternalTimeRange refresh_window = {
-			.type = InvalidOid,
-		};
-
-		CommandCounterIncrement();
-
 		/*
 		 * We are creating a refresh window here in a similar way to how it's
 		 * done in continuous_agg_refresh. We do not call the PG function
@@ -2839,9 +2838,11 @@ tsl_process_continuous_agg_viewstmt(Node *node, const char *query_string, void *
 		 * function and adding a 'verbose' parameter to is not useful for a
 		 * user.
 		 */
-		relid = get_relname_relid(stmt->into->rel->relname, nspid);
-		cagg = ts_continuous_agg_find_by_relid(relid);
-		Assert(cagg != NULL);
+
+		InternalTimeRange refresh_window = {
+			.type = InvalidOid,
+		};
+
 		refresh_window.type = cagg->partition_type;
 		/*
 		 * To determine inscribed/circumscribed refresh window for variable-sized
@@ -2863,6 +2864,11 @@ tsl_process_continuous_agg_viewstmt(Node *node, const char *query_string, void *
 
 		continuous_agg_refresh_internal(cagg, &refresh_window, CAGG_REFRESH_CREATION, true, true);
 	}
+	else
+		(void) invalidation_threshold_set_or_get(cagg->data.mat_hypertable_id,
+												 ts_time_get_min(cagg->partition_type),
+												 true);
+
 	return DDL_DONE;
 }
 

@@ -151,9 +151,9 @@ step LockInvalThrEx: BEGIN; LOCK TABLE _timescaledb_catalog.continuous_aggs_inva
 step Ic: COMMIT; <waiting ...>
 step UnlockMatInval: ROLLBACK;
 R1: NOTICE:  continuous aggregate "continuous_view" is already up-to-date
-step Refresh1: <... completed>
 step LockInvalThrEx: <... completed>
 step UnlockInvalThrEx: ROLLBACK;
+step Refresh1: <... completed>
 step Ic: <... completed>
 step SV1: SELECT * FROM continuous_view order by 1;
 time_bucket|count

@@ -1164,6 +1164,8 @@ drop_continuous_agg(FormData_continuous_agg *cadata, bool drop_user_view)
 		{
 			invalidation_threshold_delete(form.raw_hypertable_id);
 		}
+
+		invalidation_threshold_delete(form.mat_hypertable_id);
 	}
 
 	if (cadata->bucket_width == BUCKET_WIDTH_VARIABLE)
@@ -1591,11 +1593,6 @@ watermark_valid(const Watermark *w, int32 hyper_id)
 static Watermark *
 watermark_create(const ContinuousAgg *cagg, MemoryContext top_mctx)
 {
-	Hypertable *ht;
-	const Dimension *dim;
-	Datum maxdat;
-	bool max_isnull;
-	Oid timetype;
 	Watermark *w;
 	MemoryContext mctx =
 		AllocSetContextCreate(top_mctx, "Watermark function", ALLOCSET_DEFAULT_SIZES);
@@ -1607,40 +1604,8 @@ watermark_create(const ContinuousAgg *cagg, MemoryContext top_mctx)
 	w->cb.func = reset_watermark;
 	MemoryContextRegisterResetCallback(mctx, &w->cb);
 
-	ht = ts_hypertable_get_by_id(cagg->data.mat_hypertable_id);
-	Assert(NULL != ht);
-	dim = hyperspace_get_open_dimension(ht->space, 0);
-	timetype = ts_dimension_get_partition_type(dim);
-	maxdat = ts_hypertable_get_open_dim_max_value(ht, 0, &max_isnull);
-
-	if (!max_isnull)
-	{
-		int64 value = ts_time_value_to_internal(maxdat, timetype);
-
-		/* The materialized hypertable is already bucketed, which means the
-		 * max is the start of the last bucket. Add one bucket to move to the
-		 * point where the materialized data ends. */
-		if (ts_continuous_agg_bucket_width_variable(cagg))
-		{
-			/*
-			 * Since `value` is already bucketed, `bucketed = true` flag can
-			 * be added to ts_compute_beginning_of_the_next_bucket_variable() as
-			 * an optimization, if necessary.
-			 */
-			w->value =
-				ts_compute_beginning_of_the_next_bucket_variable(value, cagg->bucket_function);
-		}
-		else
-		{
-			w->value =
-				ts_time_saturating_add(value, ts_continuous_agg_bucket_width(cagg), timetype);
-		}
-	}
-	else
-	{
-		/* Nothing materialized, so return min */
-		w->value = ts_time_get_min(timetype);
-	}
+	w->value =
+		ts_cm_functions->continuous_agg_invalidation_threshold_get(cagg->data.mat_hypertable_id);
 
 	return w;
 }

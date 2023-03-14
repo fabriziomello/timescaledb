@@ -67,7 +67,7 @@
 typedef struct InvalidationThresholdData
 {
 	int64 threshold;
-	bool was_updated;
+	bool force_update;
 } InvalidationThresholdData;
 
 static ScanTupleResult
@@ -79,7 +79,7 @@ scan_update_invalidation_threshold(TupleInfo *ti, void *data)
 	Form_continuous_aggs_invalidation_threshold form =
 		(Form_continuous_aggs_invalidation_threshold) GETSTRUCT(tuple);
 
-	if (invthresh->threshold > form->watermark)
+	if (invthresh->threshold > form->watermark || invthresh->force_update)
 	{
 		HeapTuple new_tuple = heap_copytuple(tuple);
 		form = (Form_continuous_aggs_invalidation_threshold) GETSTRUCT(new_tuple);
@@ -87,7 +87,6 @@ scan_update_invalidation_threshold(TupleInfo *ti, void *data)
 		form->watermark = invthresh->threshold;
 		ts_catalog_update(ti->scanrel, new_tuple);
 		heap_freetuple(new_tuple);
-		invthresh->was_updated = true;
 	}
 	else
 	{
@@ -116,12 +115,13 @@ scan_update_invalidation_threshold(TupleInfo *ti, void *data)
  * is returned instead.
  */
 int64
-invalidation_threshold_set_or_get(int32 raw_hypertable_id, int64 invalidation_threshold)
+invalidation_threshold_set_or_get(int32 raw_hypertable_id, int64 invalidation_threshold,
+								  bool force_update)
 {
 	bool threshold_found;
 	InvalidationThresholdData data = {
 		.threshold = invalidation_threshold,
-		.was_updated = false,
+		.force_update = force_update,
 	};
 	ScanKeyData scankey[1];
 
@@ -280,11 +280,17 @@ invalidation_threshold_lock(int32 raw_hypertable_id)
  * window, unless it ends at "infinity" in which case the threshold is capped
  * at the end of the last bucket materialized.
  */
-int64
-invalidation_threshold_compute(const ContinuousAgg *cagg, const InternalTimeRange *refresh_window)
+static int64
+invalidation_threshold_compute_internal(const ContinuousAgg *cagg, bool compute_raw_ht,
+										const InternalTimeRange *refresh_window)
 {
 	bool max_refresh = false;
-	Hypertable *ht = ts_hypertable_get_by_id(cagg->data.raw_hypertable_id);
+	Hypertable *ht;
+
+	if (compute_raw_ht)
+		ht = ts_hypertable_get_by_id(cagg->data.raw_hypertable_id);
+	else
+		ht = ts_hypertable_get_by_id(cagg->data.mat_hypertable_id);
 
 	if (IS_TIMESTAMP_TYPE(refresh_window->type))
 		max_refresh = TS_TIME_IS_END(refresh_window->end, refresh_window->type) ||
@@ -341,4 +347,43 @@ invalidation_threshold_compute(const ContinuousAgg *cagg, const InternalTimeRang
 	}
 
 	return refresh_window->end;
+}
+
+/* Compute a new invalidation threshold for raw hypertable */
+int64
+invalidation_threshold_compute_raw_ht(const ContinuousAgg *cagg,
+									  const InternalTimeRange *refresh_window)
+{
+	return invalidation_threshold_compute_internal(cagg, true, refresh_window);
+}
+
+/* Compute a new invalidation threshold for materialization hypertable */
+int64
+invalidation_threshold_compute_mat_ht(const ContinuousAgg *cagg,
+									  const InternalTimeRange *refresh_window)
+{
+	return invalidation_threshold_compute_internal(cagg, false, refresh_window);
+}
+
+/* Force invalidation thresold update to the last materialized data */
+void
+invalidation_threshold_force_update(int32 hypertable_id)
+{
+	ContinuousAgg *cagg = ts_continuous_agg_find_by_mat_hypertable_id(hypertable_id);
+	InternalTimeRange refresh_window;
+	int64 computed_threshold;
+
+	if (NULL == cagg)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid materialized hypertable ID: %d", hypertable_id)));
+	}
+
+	/* Force compute the last materialized data */
+	refresh_window.type = cagg->partition_type;
+	refresh_window.end = ts_time_get_noend_or_max(refresh_window.type);
+	computed_threshold = invalidation_threshold_compute_mat_ht(cagg, &refresh_window);
+
+	(void) invalidation_threshold_set_or_get(hypertable_id, computed_threshold, true);
 }

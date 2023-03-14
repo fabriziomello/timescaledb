@@ -47,14 +47,14 @@ GROUP BY 1 order by 1;
 select * from cagg_2 order by 1,2;
 CALL refresh_continuous_aggregate('cagg_2', NULL, NULL);
 select * from cagg_2 order by 1,2;
-SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold;
+SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold ORDER BY 1;
 
 --TEST2: cagg_2 gets invalidations after cagg_1's refresh
 --will trigger invalidations
 INSERT INTO continuous_agg_test VALUES
     (10, -4, 10), (11, - 3, 50), (11, - 3, 70), (10, - 4, 10);
 
-SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold;
+SELECT * FROM _timescaledb_catalog.continuous_aggs_invalidation_threshold ORDER BY 1;
 CALL refresh_continuous_aggregate('cagg_1', NULL, NULL);
 select * from cagg_1 order by 1;
 SELECT time_bucket(2, timeval), COUNT(col1) as value

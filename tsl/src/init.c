@@ -30,6 +30,7 @@
 #include "continuous_aggs/options.h"
 #include "continuous_aggs/refresh.h"
 #include "continuous_aggs/invalidation.h"
+#include "continuous_aggs/invalidation_threshold.h"
 #include "cross_module_fn.h"
 #include "nodes/data_node_dispatch.h"
 #include "data_node.h"
@@ -154,6 +155,8 @@ CrossModuleFunctions tsl_cm_functions = {
 	.continuous_agg_invalidate_raw_ht = continuous_agg_invalidate_raw_ht,
 	.continuous_agg_invalidate_mat_ht = continuous_agg_invalidate_mat_ht,
 	.continuous_agg_update_options = continuous_agg_update_options,
+	.continuous_agg_invalidation_threshold_get = invalidation_threshold_get,
+	.continuous_agg_invalidation_threshold_force_update = invalidation_threshold_force_update,
 	.invalidation_cagg_log_add_entry = tsl_invalidation_cagg_log_add_entry,
 	.invalidation_hyper_log_add_entry = tsl_invalidation_hyper_log_add_entry,
 	.remote_invalidation_log_delete = remote_invalidation_log_delete,

@@ -320,6 +320,20 @@ continuous_agg_invalidate_mat_ht_all_default(const Hypertable *raw_ht, const Hyp
 	pg_unreachable();
 }
 
+static int64
+continuous_agg_invalidation_threshold_get_default(int32 hypertable_id)
+{
+	error_no_default_fn_community();
+	pg_unreachable();
+}
+
+static void
+continuous_agg_invalidation_threshold_force_update_default(int32 mat_hypertable_id)
+{
+	error_no_default_fn_community();
+	pg_unreachable();
+}
+
 static void
 continuous_agg_call_invalidation_trigger_default(int32 hypertable_id, Relation chunk_rel,
 												 HeapTuple chunk_tuple, HeapTuple chunk_newtuple,
@@ -486,6 +500,9 @@ TSDLLEXPORT CrossModuleFunctions ts_cm_functions_default = {
 	.continuous_agg_invalidate_raw_ht = continuous_agg_invalidate_raw_ht_all_default,
 	.continuous_agg_invalidate_mat_ht = continuous_agg_invalidate_mat_ht_all_default,
 	.continuous_agg_update_options = continuous_agg_update_options_default,
+	.continuous_agg_invalidation_threshold_get = continuous_agg_invalidation_threshold_get_default,
+	.continuous_agg_invalidation_threshold_force_update =
+		continuous_agg_invalidation_threshold_force_update_default,
 	.invalidation_cagg_log_add_entry = error_no_default_fn_pg_community,
 	.invalidation_hyper_log_add_entry = error_no_default_fn_pg_community,
 	.remote_invalidation_log_delete = NULL,
