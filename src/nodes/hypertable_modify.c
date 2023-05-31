@@ -1006,7 +1006,7 @@ ExecModifyTable(CustomScanState *cs_node, PlanState *pstate)
 					Relation relation = resultRelInfo->ri_RelationDesc;
 
 					Assert(tupleid != NULL);
-					if (!table_tuple_fetch_row_version(relation, tupleid, SnapshotAny, oldSlot))
+					if (!table_tuple_fetch_row_version(relation, PointerGetDatum(tupleid), SnapshotAny, oldSlot))
 						elog(ERROR, "failed to fetch tuple being updated");
 				}
 #if PG14_LT
@@ -1699,7 +1699,7 @@ ExecInsert(ModifyTableContext *context, ResultRelInfo *resultRelInfo, TupleTable
 		if (onconflict != ONCONFLICT_NONE && resultRelInfo->ri_NumIndices > 0)
 		{
 			/* Perform a speculative insertion. */
-			uint32 specToken;
+			// uint32 specToken;
 			ItemPointerData conflictTid;
 			bool specConflict;
 			List *arbiterIndexes;
@@ -1779,15 +1779,15 @@ ExecInsert(ModifyTableContext *context, ResultRelInfo *resultRelInfo, TupleTable
 			 * if we're going to go ahead with the insertion, instead of
 			 * waiting for the whole transaction to complete.
 			 */
-			specToken = SpeculativeInsertionLockAcquire(GetCurrentTransactionId());
+			// specToken = SpeculativeInsertionLockAcquire(GetCurrentTransactionId());
 
 			/* insert the tuple, with the speculative token */
-			table_tuple_insert_speculative(resultRelationDesc,
-										   slot,
-										   estate->es_output_cid,
-										   0,
-										   NULL,
-										   specToken);
+			// table_tuple_insert_speculative(resultRelationDesc,
+			// 							   slot,
+			// 							   estate->es_output_cid,
+			// 							   0,
+			// 							   NULL,
+			// 							   specToken);
 
 			/* insert index entries for tuple */
 			recheckIndexes = ExecInsertIndexTuples(resultRelInfo,
@@ -1799,7 +1799,7 @@ ExecInsert(ModifyTableContext *context, ResultRelInfo *resultRelInfo, TupleTable
 												   arbiterIndexes);
 
 			/* adjust the tuple's state accordingly */
-			table_tuple_complete_speculative(resultRelationDesc, slot, specToken, !specConflict);
+			//table_tuple_complete_speculative(resultRelationDesc, slot, specToken, !specConflict);
 
 			/*
 			 * Wake up anyone waiting for our decision.  They will re-check
@@ -1825,8 +1825,9 @@ ExecInsert(ModifyTableContext *context, ResultRelInfo *resultRelInfo, TupleTable
 		}
 		else
 		{
+			bool insert_indexes = false;
 			/* insert the tuple normally */
-			table_tuple_insert(resultRelationDesc, slot, estate->es_output_cid, 0, NULL);
+			table_tuple_insert(resultRelationDesc, slot, estate->es_output_cid, 0, NULL, &insert_indexes);
 
 			/* insert index entries for tuple */
 			if (resultRelInfo->ri_NumIndices > 0)
@@ -2105,7 +2106,7 @@ ExecUpdate(ModifyTableContext *context, ResultRelInfo *resultRelInfo, ItemPointe
 											 resultRelInfo->ri_RangeTableIndex);
 
 				result = table_tuple_lock(resultRelationDesc,
-										  tupleid,
+										  PointerGetDatum(tupleid),
 										  estate->es_snapshot,
 										  inputslot,
 										  estate->es_output_cid,
@@ -2134,7 +2135,7 @@ ExecUpdate(ModifyTableContext *context, ResultRelInfo *resultRelInfo, ItemPointe
 						/* Fetch the most recent version of old tuple. */
 						oldSlot = resultRelInfo->ri_oldTupleSlot;
 						if (!table_tuple_fetch_row_version(resultRelationDesc,
-														   tupleid,
+														   PointerGetDatum(tupleid),
 														   SnapshotAny,
 														   oldSlot))
 							elog(ERROR, "failed to fetch tuple being updated");
@@ -2251,7 +2252,7 @@ ExecOnConflictUpdate(ModifyTableContext *context, ResultRelInfo *resultRelInfo,
 	 * true anymore.
 	 */
 	test = table_tuple_lock(relation,
-							conflictTid,
+							PointerGetDatum(conflictTid),
 							context->estate->es_snapshot,
 							existing,
 							context->estate->es_output_cid,
@@ -2485,7 +2486,7 @@ ExecCheckTIDVisible(EState *estate, ResultRelInfo *relinfo, ItemPointer tid,
 	if (!IsolationUsesXactSnapshot())
 		return;
 
-	if (!table_tuple_fetch_row_version(rel, tid, SnapshotAny, tempSlot))
+	if (!table_tuple_fetch_row_version(rel, PointerGetDatum(tid), SnapshotAny, tempSlot))
 		elog(ERROR, "failed to fetch conflicting tuple for ON CONFLICT");
 	ExecCheckTupleVisible(estate, rel, tempSlot);
 	ExecClearTuple(tempSlot);
@@ -2654,7 +2655,7 @@ ExecDelete(ModifyTableContext *context, ResultRelInfo *resultRelInfo, ItemPointe
 											 resultRelInfo->ri_RangeTableIndex);
 
 				result = table_tuple_lock(resultRelationDesc,
-										  tupleid,
+										  PointerGetDatum(tupleid),
 										  estate->es_snapshot,
 										  inputslot,
 										  estate->es_output_cid,
@@ -2793,7 +2794,7 @@ ExecDelete(ModifyTableContext *context, ResultRelInfo *resultRelInfo, ItemPointe
 			}
 			else
 			{
-				if (!table_tuple_fetch_row_version(resultRelationDesc, tupleid, SnapshotAny, slot))
+				if (!table_tuple_fetch_row_version(resultRelationDesc, PointerGetDatum(tupleid), SnapshotAny, slot))
 					elog(ERROR, "failed to fetch deleted tuple for DELETE RETURNING");
 			}
 		}

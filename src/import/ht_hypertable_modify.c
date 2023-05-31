@@ -46,7 +46,7 @@ ht_ExecUpdatePrologue(ModifyTableContext * context, ResultRelInfo * resultRelInf
 		return ExecBRUpdateTriggersCompat(context->estate,
 						  context->epqstate,
 						  resultRelInfo,
-						  tupleid,
+						  PointerGetDatum(tupleid),
 						  oldtuple,
 						  slot,
 						  &context->tmfd);
@@ -163,7 +163,7 @@ ht_ExecUpdateAct(ModifyTableContext * context, ResultRelInfo * resultRelInfo, It
 	 * mode transactions.
 	 */
 	result = table_tuple_update(resultRelationDesc,
-				    tupleid,
+				    PointerGetDatum(tupleid),
 				    slot,
 				    estate->es_output_cid,
 				    estate->es_snapshot,
@@ -171,7 +171,8 @@ ht_ExecUpdateAct(ModifyTableContext * context, ResultRelInfo * resultRelInfo, It
 				    true /* wait for commit */ ,
 				    &context->tmfd,
 				    &context->lockmode,
-				    &updateCxt->updateIndexes);
+				    &updateCxt->updateIndexes,
+					resultRelInfo->ri_oldTupleSlot);
 	if (result == TM_Ok)
 		updateCxt->updated = true;
 
@@ -202,8 +203,9 @@ ht_ExecUpdateEpilogue(ModifyTableContext * context, UpdateContext * updateCxt,
 				   resultRelInfo,
 				   NULL,
 				   NULL,
-				   tupleid,
 				   oldtuple,
+				   //resultRelInfo->ri_oldTupleSlot,
+				   resultRelInfo->ri_TrigOldSlot,
 				   slot,
 				   recheckIndexes,
 				   mtstate->operation == CMD_INSERT ?
@@ -241,8 +243,9 @@ ht_ExecDeletePrologue(ModifyTableContext * context, ResultRelInfo * resultRelInf
 		return ExecBRDeleteTriggers(context->estate,
 					    context->epqstate,
 					    resultRelInfo,
-					    tupleid,
-					    oldtuple,
+					    // oldtuple,
+						PointerGetDatum(tupleid),
+						oldtuple,
 					    epqreturnslot);
 
 	return true;
@@ -261,13 +264,14 @@ ht_ExecDeleteAct(ModifyTableContext * context, ResultRelInfo * resultRelInfo, It
 	EState	       *estate = context->estate;
 
 	return table_tuple_delete(resultRelInfo->ri_RelationDesc,
-				  tupleid,
+				  PointerGetDatum(tupleid),
 				  estate->es_output_cid,
 				  estate->es_snapshot,
 				  estate->es_crosscheck_snapshot,
 				  true /* wait for commit */ ,
 				  &context->tmfd,
-				  changingPart);
+				  changingPart,
+				  resultRelInfo->ri_oldTupleSlot);
 }
 
 /*
@@ -298,9 +302,10 @@ ht_ExecDeleteEpilogue(ModifyTableContext * context, ResultRelInfo * resultRelInf
 					   resultRelInfo,
 					   NULL,
 					   NULL,
-					   tupleid,
-					   oldtuple,
 					   NULL,
+					   //resultRelInfo->ri_oldTupleSlot,
+					   resultRelInfo->ri_TrigOldSlot,
+					   resultRelInfo->ri_TrigNewSlot,
 					   NULL,
 					   mtstate->mt_transition_capture,
 					   false);
@@ -313,7 +318,7 @@ ht_ExecDeleteEpilogue(ModifyTableContext * context, ResultRelInfo * resultRelInf
 	}
 
 	/* AFTER ROW DELETE Triggers */
-	ExecARDeleteTriggersCompat(estate, resultRelInfo, tupleid, oldtuple, ar_delete_trig_tcs, false);
+	ExecARDeleteTriggersCompat(estate, resultRelInfo, oldtuple, resultRelInfo->ri_TrigOldSlot, ar_delete_trig_tcs, false);
 }
 #endif
 
@@ -388,7 +393,7 @@ lmerge_matched:;
 	 */
 
 	if (!table_tuple_fetch_row_version(resultRelInfo->ri_RelationDesc,
-					   tupleid,
+					   PointerGetDatum(tupleid),
 					   SnapshotAny,
 					   resultRelInfo->ri_oldTupleSlot))
 		elog(ERROR, "failed to fetch the target tuple");
@@ -580,7 +585,7 @@ lmerge_matched:;
 					 resultRelInfo->ri_RangeTableIndex);
 
 				result = table_tuple_lock(resultRelationDesc,
-							  tupleid,
+							  PointerGetDatum(tupleid),
 							estate->es_snapshot,
 							  inputslot,
 						      estate->es_output_cid,

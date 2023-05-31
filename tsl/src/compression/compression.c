@@ -2025,13 +2025,14 @@ decompress_batches_for_insert(ChunkInsertState *cis, Chunk *chunk, TupleTableSlo
 		TM_FailureData tmfd;
 		TM_Result result pg_attribute_unused();
 		result = table_tuple_delete(in_rel,
-									&compressed_tuple->t_self,
+									PointerGetDatum(&compressed_tuple->t_self),
 									decompressor.mycid,
 									GetTransactionSnapshot(),
 									InvalidSnapshot,
 									true,
 									&tmfd,
-									false);
+									false,
+									NULL);
 		Assert(result == TM_Ok);
 	}
 
@@ -2644,13 +2645,14 @@ decompress_batches(RowDecompressor *decompressor, ScanKeyData *scankeys, int num
 		TM_FailureData tmfd;
 		TM_Result result;
 		result = table_tuple_delete(decompressor->in_rel,
-									&compressed_tuple->t_self,
+									PointerGetDatum(&compressed_tuple->t_self),
 									decompressor->mycid,
 									snapshot,
 									InvalidSnapshot,
 									true,
 									&tmfd,
-									false);
+									false,
+									NULL);
 
 		switch (result)
 		{

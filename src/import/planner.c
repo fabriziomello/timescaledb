@@ -45,8 +45,8 @@ static EquivalenceMember *find_computable_ec_member(PlannerInfo *root, Equivalen
 													List *exprs, Relids relids,
 													bool require_parallel_safe);
 #endif
-static Node *replace_nestloop_params(PlannerInfo *root, Node *expr);
-static Node *replace_nestloop_params_mutator(Node *node, PlannerInfo *root);
+static Node *ts_replace_nestloop_params(PlannerInfo *root, Node *expr);
+static Node *ts_replace_nestloop_params_mutator(Node *node, PlannerInfo *root);
 static Plan *inject_projection_plan(Plan *subplan, List *tlist, bool parallel_safe);
 
 /* copied verbatim from prepunion.c */
@@ -919,7 +919,7 @@ ts_build_path_tlist(PlannerInfo *root, Path *path)
 		 * separately.
 		 */
 		if (path->param_info)
-			node = replace_nestloop_params(root, node);
+			node = ts_replace_nestloop_params(root, node);
 
 		tle = makeTargetEntry((Expr *) node, resno, NULL, false);
 		if (sortgrouprefs)
@@ -932,7 +932,7 @@ ts_build_path_tlist(PlannerInfo *root, Path *path)
 }
 
 /*
- * replace_nestloop_params
+ * ts_replace_nestloop_params
  *    Replace outer-relation Vars and PlaceHolderVars in the given expression
  *    with nestloop Params
  *
@@ -941,14 +941,14 @@ ts_build_path_tlist(PlannerInfo *root, Path *path)
  * root->curOuterParams if not already present.
  */
 static Node *
-replace_nestloop_params(PlannerInfo *root, Node *expr)
+ts_replace_nestloop_params(PlannerInfo *root, Node *expr)
 {
 	/* No setup needed for tree walk, so away we go */
-	return replace_nestloop_params_mutator(expr, root);
+	return ts_replace_nestloop_params_mutator(expr, root);
 }
 
 static Node *
-replace_nestloop_params_mutator(Node *node, PlannerInfo *root)
+ts_replace_nestloop_params_mutator(Node *node, PlannerInfo *root)
 {
 	if (node == NULL)
 		return NULL;
@@ -996,13 +996,13 @@ replace_nestloop_params_mutator(Node *node, PlannerInfo *root)
 			PlaceHolderVar *newphv = makeNode(PlaceHolderVar);
 
 			memcpy(newphv, phv, sizeof(PlaceHolderVar));
-			newphv->phexpr = (Expr *) replace_nestloop_params_mutator((Node *) phv->phexpr, root);
+			newphv->phexpr = (Expr *) ts_replace_nestloop_params_mutator((Node *) phv->phexpr, root);
 			return (Node *) newphv;
 		}
 		/* Replace the PlaceHolderVar with a nestloop Param */
 		return (Node *) replace_nestloop_param_placeholdervar(root, phv);
 	}
-	return expression_tree_mutator(node, replace_nestloop_params_mutator, (void *) root);
+	return expression_tree_mutator(node, ts_replace_nestloop_params_mutator, (void *) root);
 }
 
 /*

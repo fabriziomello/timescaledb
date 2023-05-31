@@ -1448,7 +1448,7 @@ tsl_recompress_chunk_segmentwise(PG_FUNCTION_ARGS)
 
 			row_decompressor_decompress_row(&decompressor, segment_tuplesortstate);
 
-			simple_table_tuple_delete(compressed_chunk_rel, &(slot->tts_tid), snapshot);
+			simple_table_tuple_delete(compressed_chunk_rel, &(slot->tts_tid), snapshot, slot);
 
 			if (should_free)
 				heap_freetuple(compressed_tuple);
@@ -1493,7 +1493,7 @@ tsl_recompress_chunk_segmentwise(PG_FUNCTION_ARGS)
 
 			row_decompressor_decompress_row(&decompressor, segment_tuplesortstate);
 
-			simple_table_tuple_delete(compressed_chunk_rel, &(slot->tts_tid), snapshot);
+			simple_table_tuple_delete(compressed_chunk_rel, &(slot->tts_tid), snapshot, slot);
 			/* because this is the first tuple of the new segment */
 			changed_segment = false;
 			/* make changes visible */

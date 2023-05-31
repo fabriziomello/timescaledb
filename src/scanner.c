@@ -412,7 +412,7 @@ ts_scanner_next(ScannerCtx *ctx)
 
 				Assert(ctx->snapshot);
 				ictx->tinfo.lockresult = table_tuple_lock(ctx->tablerel,
-														  &(slot->tts_tid),
+														  PointerGetDatum(&(slot->tts_tid)),
 														  ctx->snapshot,
 														  slot,
 														  GetCurrentCommandId(false),

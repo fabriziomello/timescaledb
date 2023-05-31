@@ -357,12 +357,14 @@ TSCopyMultiInsertBufferFlush(TSCopyMultiInsertInfo *miinfo, TSCopyMultiInsertBuf
 	estate->es_result_relation_info = resultRelInfo;
 #endif
 
+	bool insert_indexes = false;
 	table_multi_insert(resultRelInfo->ri_RelationDesc,
 					   slots,
 					   nused,
 					   mycid,
 					   ti_options,
-					   buffer->bistate);
+					   buffer->bistate,
+					   &insert_indexes);
 	MemoryContextSwitchTo(oldcontext);
 
 	for (i = 0; i < nused; i++)
@@ -1073,12 +1075,14 @@ copyfrom(CopyChunkState *ccstate, List *range_table, Hypertable *ht, MemoryConte
 
 			if (currentTupleInsertMethod == CIM_SINGLE)
 			{
+				bool insert_indexes;
 				/* OK, store the tuple and create index entries for it */
 				table_tuple_insert(resultRelInfo->ri_RelationDesc,
 								   myslot,
 								   mycid,
 								   ti_options,
-								   bistate);
+								   bistate,
+								   &insert_indexes);
 
 				if (resultRelInfo->ri_NumIndices > 0)
 					recheckIndexes = ExecInsertIndexTuplesCompat(resultRelInfo,
