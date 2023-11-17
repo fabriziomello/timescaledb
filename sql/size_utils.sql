@@ -9,6 +9,10 @@ CREATE OR REPLACE FUNCTION _timescaledb_functions.relation_size(relation REGCLAS
 RETURNS TABLE (total_size BIGINT, heap_size BIGINT, index_size BIGINT, toast_size BIGINT)
 AS '@MODULE_PATHNAME@', 'ts_relation_size' LANGUAGE C VOLATILE;
 
+CREATE OR REPLACE FUNCTION _timescaledb_functions.relation_size_approx(relation REGCLASS)
+RETURNS TABLE (total_size BIGINT, heap_size BIGINT, index_size BIGINT, toast_size BIGINT)
+AS '@MODULE_PATHNAME@', 'ts_relation_size_approx' LANGUAGE C VOLATILE;
+
 CREATE OR REPLACE VIEW _timescaledb_internal.hypertable_chunk_local_size AS
 SELECT
     h.schema_name AS hypertable_schema,

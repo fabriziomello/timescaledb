@@ -1025,6 +1025,116 @@ ts_relation_size_impl(Oid relid)
 	return relsize;
 }
 
+static inline int32
+get_relation_pages(Oid reloid)
+{
+	HeapTuple reltup;
+	// Relation relRelation;
+	int32 relpages;
+
+	// relRelation = table_open(RelationRelationId, AccessShareLock);
+	reltup = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(reloid));
+
+	if (!HeapTupleIsValid(reltup))
+		elog(ERROR, "cache lookup failed for relation %u", reloid);
+
+	relpages = ((Form_pg_class) GETSTRUCT(reltup))->relpages;
+
+	heap_freetuple(reltup);
+	// table_close(relRelation, AccessShareLock);
+
+	return relpages;
+}
+
+static inline int32
+get_indexes_pages(Relation rel)
+{
+	ListCell *index;
+	int32 relpages = 0;
+
+	/* compute indexes sizes */
+	foreach (index, RelationGetIndexList(rel))
+	{
+		Oid indexOid = lfirst_oid(index);
+		relpages += get_relation_pages(indexOid);
+	}
+
+	return relpages;
+}
+
+static RelationSize
+ts_relation_size_approx_impl(Oid reloid)
+{
+	RelationSize relsize = { 0 };
+	Relation relRelation, relClass;
+
+	relClass = table_open(RelationRelationId, AccessShareLock);
+	relRelation = table_open(reloid, AccessShareLock);
+
+	/* compute heap size */
+	relsize.heap_size = relRelation->rd_rel->relpages * BLCKSZ;
+
+	/* compute index size for relation */
+	relsize.index_size = get_indexes_pages(relRelation) * BLCKSZ;
+
+	/* if there are associated toast then compute size */
+	if (OidIsValid(relRelation->rd_rel->reltoastrelid))
+	{
+		Relation relToast;
+		
+		/* compute toast index sizes */
+		relToast = table_open(relRelation->rd_rel->reltoastrelid, AccessShareLock);
+		relsize.index_size += get_indexes_pages(relToast) * BLCKSZ;
+		table_close(relToast, AccessShareLock);
+
+		/* computa toast size */
+		relsize.toast_size = get_relation_pages(relRelation->rd_rel->reltoastrelid) * BLCKSZ;
+	}
+		
+	/* all sizes */
+	relsize.total_size = relsize.heap_size + relsize.toast_size + relsize.index_size;
+
+	table_close(relRelation, AccessShareLock);
+	table_close(relClass, AccessShareLock);
+
+	return relsize;
+}
+
+TS_FUNCTION_INFO_V1(ts_relation_size_approx);
+Datum
+ts_relation_size_approx(PG_FUNCTION_ARGS)
+{
+	Oid relid = PG_ARGISNULL(0) ? InvalidOid : PG_GETARG_OID(0);
+	RelationSize relsize = { 0 };
+	TupleDesc tupdesc;
+	HeapTuple tuple;
+	Datum values[4] = { 0 };
+	bool nulls[4] = { false };
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("function returning record called in context "
+						"that cannot accept type record")));
+
+	if (!OidIsValid(relid))
+		PG_RETURN_NULL();
+
+	relsize = ts_relation_size_approx_impl(relid);
+
+	tupdesc = BlessTupleDesc(tupdesc);
+
+	values[0] = Int64GetDatum(relsize.total_size);
+	values[1] = Int64GetDatum(relsize.heap_size);
+	values[2] = Int64GetDatum(relsize.index_size);
+	values[3] = Int64GetDatum(relsize.toast_size);
+
+	tuple = heap_form_tuple(tupdesc, values, nulls);
+
+	return HeapTupleGetDatum(tuple);
+}
+
 #define STR_VALUE(str) #str
 #define NODE_CASE(name)                                                                            \
 	case T_##name:                                                                                 \
