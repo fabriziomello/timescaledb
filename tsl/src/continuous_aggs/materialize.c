@@ -6,6 +6,8 @@
 #include <postgres.h>
 #include <executor/spi.h>
 #include <fmgr.h>
+#include <parser/analyze.h>
+#include <tcop/utility.h>
 #include <lib/stringinfo.h>
 #include <utils/builtins.h>
 #include <utils/rel.h>
@@ -32,6 +34,102 @@ static TimeRange internal_time_range_to_time_range(InternalTimeRange internal);
 static int64 range_length(const InternalTimeRange range);
 static Datum internal_to_time_value_or_infinite(int64 internal, Oid time_type,
 												bool *is_infinite_out);
+
+static PlannedStmt *
+sql_create_plan(const char *queryString)
+{
+	List *raw_parsetree_list;
+	raw_parsetree_list = pg_parse_query(queryString);
+
+	Ensure(list_length(raw_parsetree_list) == 1, "multi statement SQL string is not allowed");
+
+	RawStmt *rawstmt;
+	ParseState *pstate;
+	List *rewritten;
+	PlannedStmt *plan;
+	Query *query;
+	Query *copied_query;
+
+	/* Transform ParseTree into QueryTree */
+	rawstmt = (RawStmt *) linitial(raw_parsetree_list);
+	pstate = make_parsestate(NULL);
+	pstate->p_sourcetext = queryString;
+	query = transformTopLevelStmt(pstate, rawstmt);
+	free_parsestate(pstate);
+
+	/* Lock and rewrite, using a copy to preserve the original query. */
+	copied_query = copyObject(query);
+	AcquireRewriteLocks(copied_query, true, false);
+	rewritten = QueryRewrite(copied_query);
+
+	/* SELECT should never rewrite to more or less than one SELECT query */
+	if (list_length(rewritten) != 1)
+		elog(ERROR, "unexpected rewrite result for execute_sql function");
+	query = (Query *) linitial(rewritten);
+
+	/* Check for user-requested abort. */
+	CHECK_FOR_INTERRUPTS();
+
+	/* Plan the query which will generate data for the refresh. */
+	plan = pg_plan_query(query, queryString, CURSOR_OPT_PARALLEL_OK, NULL);
+
+	return plan;
+}
+
+static QueryDesc *
+sql_execute_plan(const char *queryString, PlannedStmt *plan, DestReceiver *receiver)
+{
+	QueryDesc *queryDesc;
+
+	/*
+	 * Use a snapshot with an updated command ID to ensure this query sees
+	 * results of any previously executed queries.  (This could only matter if
+	 * the planner executed an allegedly-stable function that changed the
+	 * database contents, but let's do it anyway to be safe.)
+	 */
+	PushCopiedSnapshot(GetActiveSnapshot());
+	UpdateActiveSnapshotCommandId();
+
+	/* Create a proper DestReceiver */
+	// receiver = CreateDestReceiver(DestNone);
+
+	/* Create a QueryDesc, redirecting output to our tuple receiver */
+	queryDesc = CreateQueryDesc(plan,
+								queryString,
+								GetActiveSnapshot(),
+								InvalidSnapshot,
+								receiver,
+								NULL,
+								NULL,
+								0);
+
+	/* call ExecutorStart to prepare the plan for execution */
+	ExecutorStart(queryDesc, 0);
+
+	/* run the plan */
+	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
+
+	return queryDesc;
+}
+
+static void
+sql_close_plan(QueryDesc *queryDesc, DestReceiver *receiver)
+{
+	// processed = queryDesc->estate->es_processed;
+
+	/* and clean up */
+	ExecutorFinish(queryDesc);
+	ExecutorEnd(queryDesc);
+
+	FreeQueryDesc(queryDesc);
+
+	/* Clean up the receiver. */
+	(*receiver->rDestroy)(receiver);
+
+	PopActiveSnapshot();
+
+	// return processed;
+}
 
 /***************************
  * materialization support *
@@ -246,7 +344,6 @@ static void
 spi_delete_materializations(SchemaAndName materialization_table, const NameData *time_column_name,
 							TimeRange invalidation_range, const char *const chunk_condition)
 {
-	int res;
 	StringInfo command = makeStringInfo();
 	Oid out_fn;
 	bool type_is_varlena;
@@ -268,9 +365,27 @@ spi_delete_materializations(SchemaAndName materialization_table, const NameData 
 					 quote_literal_cstr(invalidation_end),
 					 chunk_condition);
 
-	res = SPI_execute(command->data, false /* read_only */, 0 /*count*/);
+	int64 rows_processed = 0;
+	PlannedStmt *plan = sql_create_plan(command->data);
+	DestReceiver *receiver = CreateDestReceiver(DestNone);
+	QueryDesc *queryDesc;
+	
+	PG_TRY();
+	{
+		queryDesc = sql_execute_plan(command->data, plan, receiver);
+		rows_processed = queryDesc->estate->es_processed;
+	}
+	PG_CATCH();
+	{
+		rows_processed = -1;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
 
-	if (res < 0)
+	if (queryDesc)
+		sql_close_plan(queryDesc, receiver);
+
+	if (rows_processed < 0)
 		elog(ERROR,
 			 "could not delete old values from materialization table \"%s.%s\"",
 			 NameStr(*materialization_table.schema),
@@ -312,9 +427,30 @@ spi_insert_materializations(Hypertable *mat_ht, SchemaAndName partial_view,
 					 quote_literal_cstr(materialization_end),
 					 chunk_condition);
 
-	res = SPI_execute(command->data, false /* read_only */, 0 /*count*/);
+	int64 rows_processed = 0;
+	PlannedStmt *plan = sql_create_plan(command->data);
+	DestReceiver *receiver = CreateDestReceiver(DestNone);
+	QueryDesc *queryDesc;
+	
+	PG_TRY();
+	{
+		queryDesc = sql_execute_plan(command->data, plan, receiver);
 
-	if (res < 0)
+		// HeapTuple tuple = ExecFetchSlotHeapTuple(queryDesc->estate.)
+
+		rows_processed = queryDesc->estate->es_processed;
+	}
+	PG_CATCH();
+	{
+		rows_processed = -1;
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
+	if (queryDesc)
+		sql_close_plan(queryDesc, receiver);
+
+	if (rows_processed < 0)
 		elog(ERROR,
 			 "could not materialize values into the materialization table \"%s.%s\"",
 			 NameStr(*materialization_table.schema),
@@ -322,12 +458,12 @@ spi_insert_materializations(Hypertable *mat_ht, SchemaAndName partial_view,
 	else
 		elog(LOG,
 			 "inserted " UINT64_FORMAT " row(s) into materialization table \"%s.%s\"",
-			 SPI_processed,
+			 rows_processed,
 			 NameStr(*materialization_table.schema),
 			 NameStr(*materialization_table.name));
 
 	/* Get the max(time_dimension) of the materialized data */
-	if (SPI_processed > 0)
+	if (rows_processed > 0)
 	{
 		int64 watermark;
 		bool isnull;
