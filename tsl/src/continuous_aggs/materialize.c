@@ -5,6 +5,7 @@
  */
 #include <postgres.h>
 #include <executor/spi.h>
+#include <executor/tstoreReceiver.h>
 #include <fmgr.h>
 #include <parser/analyze.h>
 #include <tcop/utility.h>
@@ -64,11 +65,20 @@ sql_create_plan(const char *queryString)
 
 	/* SELECT should never rewrite to more or less than one SELECT query */
 	if (list_length(rewritten) != 1)
-		elog(ERROR, "unexpected rewrite result for execute_sql function");
+		elog(ERROR, "unexpected rewrite result for sql_create_plan function");
 	query = (Query *) linitial(rewritten);
 
 	/* Check for user-requested abort. */
 	CHECK_FOR_INTERRUPTS();
+
+	/*
+	 * Use a snapshot with an updated command ID to ensure this query sees
+	 * results of any previously executed queries.  (This could only matter if
+	 * the planner executed an allegedly-stable function that changed the
+	 * database contents, but let's do it anyway to be safe.)
+	 */
+	PushActiveSnapshot(GetTransactionSnapshot());
+	UpdateActiveSnapshotCommandId();
 
 	/* Plan the query which will generate data for the refresh. */
 	plan = pg_plan_query(query, queryString, CURSOR_OPT_PARALLEL_OK, NULL);
@@ -80,18 +90,6 @@ static QueryDesc *
 sql_execute_plan(const char *queryString, PlannedStmt *plan, DestReceiver *receiver)
 {
 	QueryDesc *queryDesc;
-
-	/*
-	 * Use a snapshot with an updated command ID to ensure this query sees
-	 * results of any previously executed queries.  (This could only matter if
-	 * the planner executed an allegedly-stable function that changed the
-	 * database contents, but let's do it anyway to be safe.)
-	 */
-	PushCopiedSnapshot(GetActiveSnapshot());
-	UpdateActiveSnapshotCommandId();
-
-	/* Create a proper DestReceiver */
-	// receiver = CreateDestReceiver(DestNone);
 
 	/* Create a QueryDesc, redirecting output to our tuple receiver */
 	queryDesc = CreateQueryDesc(plan,
@@ -115,8 +113,6 @@ sql_execute_plan(const char *queryString, PlannedStmt *plan, DestReceiver *recei
 static void
 sql_close_plan(QueryDesc *queryDesc, DestReceiver *receiver)
 {
-	// processed = queryDesc->estate->es_processed;
-
 	/* and clean up */
 	ExecutorFinish(queryDesc);
 	ExecutorEnd(queryDesc);
@@ -127,8 +123,6 @@ sql_close_plan(QueryDesc *queryDesc, DestReceiver *receiver)
 	(*receiver->rDestroy)(receiver);
 
 	PopActiveSnapshot();
-
-	// return processed;
 }
 
 /***************************
@@ -403,7 +397,6 @@ spi_insert_materializations(Hypertable *mat_ht, SchemaAndName partial_view,
 							SchemaAndName materialization_table, const NameData *time_column_name,
 							TimeRange materialization_range, const char *const chunk_condition)
 {
-	int res;
 	StringInfo command = makeStringInfo();
 	Oid out_fn;
 	bool type_is_varlena;
@@ -435,9 +428,6 @@ spi_insert_materializations(Hypertable *mat_ht, SchemaAndName partial_view,
 	PG_TRY();
 	{
 		queryDesc = sql_execute_plan(command->data, plan, receiver);
-
-		// HeapTuple tuple = ExecFetchSlotHeapTuple(queryDesc->estate.)
-
 		rows_processed = queryDesc->estate->es_processed;
 	}
 	PG_CATCH();
@@ -465,10 +455,6 @@ spi_insert_materializations(Hypertable *mat_ht, SchemaAndName partial_view,
 	/* Get the max(time_dimension) of the materialized data */
 	if (rows_processed > 0)
 	{
-		int64 watermark;
-		bool isnull;
-		Datum maxdat;
-
 		resetStringInfo(command);
 		appendStringInfo(command,
 						 "SELECT %s FROM %s.%s AS I "
@@ -481,22 +467,55 @@ spi_insert_materializations(Hypertable *mat_ht, SchemaAndName partial_view,
 						 quote_literal_cstr(materialization_start),
 						 chunk_condition);
 
-		res = SPI_execute(command->data, false /* read_only */, 0 /*count*/);
+		rows_processed = 0;
+		plan = sql_create_plan(command->data);
+		receiver = CreateDestReceiver(DestTuplestore);
 
-		if (res < 0)
-			elog(ERROR, "could not get the last bucket of the materialized data");
+		Tuplestorestate *tuplestore = tuplestore_begin_heap(false, false, work_mem);
+		SetTuplestoreDestReceiverParams(receiver,
+										tuplestore,
+										CurrentMemoryContext,
+										false,
+										NULL,
+										NULL);
 
-		Ensure(SPI_gettypeid(SPI_tuptable->tupdesc, 1) == materialization_range.type,
-			   "partition types for result (%d) and dimension (%d) do not match",
-			   SPI_gettypeid(SPI_tuptable->tupdesc, 1),
-			   materialization_range.type);
-		maxdat = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+		PG_TRY();
+		{		
+			TupleTableSlot *slot;
+			MemoryContext oldctx;
+			bool found;
+			int64 watermark;
+			bool isnull;
+			Datum maxdat;
 
-		if (!isnull)
-		{
-			watermark = ts_time_value_to_internal(maxdat, materialization_range.type);
-			ts_cagg_watermark_update(mat_ht, watermark, isnull, false);
+			queryDesc = sql_execute_plan(command->data, plan, receiver);
+			oldctx = MemoryContextSwitchTo(GetPerTupleMemoryContext(queryDesc->estate));
+			slot = MakeSingleTupleTableSlot(queryDesc->tupDesc, &TTSOpsMinimalTuple);
+			found = tuplestore_gettupleslot(tuplestore, true, false, slot);
+
+			if (found)
+			{
+				maxdat = slot_getattr(slot, 1, &isnull);
+
+				if (!isnull)
+				{
+					watermark = ts_time_value_to_internal(maxdat, materialization_range.type);
+					ts_cagg_watermark_update(mat_ht, watermark, isnull, false);
+				}
+			}
+
+			MemoryContextSwitchTo(oldctx);
+			
 		}
+		PG_CATCH();
+		{
+			rows_processed = -1;
+			PG_RE_THROW();
+		}
+		PG_END_TRY();
+
+		if (queryDesc)
+			sql_close_plan(queryDesc, receiver);
 	}
 }
 /*
