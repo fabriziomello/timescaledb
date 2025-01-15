@@ -23,7 +23,6 @@ SHOW timescaledb.enable_job_execution_logging;
 
 -- Start Background Workers
 SELECT _timescaledb_functions.start_background_workers();
-SELECT pg_sleep(6);
 
 SELECT add_job('custom_job_ok', schedule_interval => interval '1 hour', initial_start := now()) AS job_id_1 \gset
 SELECT add_job('custom_job_error', schedule_interval => interval '1 hour', initial_start := now()) AS job_id_2 \gset

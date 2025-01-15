@@ -33,6 +33,7 @@
 #include <utils/timestamp.h>
 
 #include "compat/compat.h"
+#include "bgw/job_stat_history.h"
 #include "bgw/scheduler.h"
 #include "bgw_policy/chunk_stats.h"
 #include "bgw_policy/policy.h"
@@ -1167,6 +1168,9 @@ ts_bgw_job_entrypoint(PG_FUNCTION_ARGS)
 	/* get parameters from bgworker */
 	job->job_history.id = params.job_history_id;
 	job->job_history.execution_start = params.job_history_execution_start;
+	StartTransactionCommand();
+	ts_bgw_job_stat_history_update(JOB_STAT_HISTORY_UPDATE_PID, job, JOB_SUCCESS, NULL);
+	CommitTransactionCommand();
 
 	elog(DEBUG2, "job %d (%s) found", params.job_id, NameStr(job->fd.application_name));
 

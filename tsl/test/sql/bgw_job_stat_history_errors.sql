@@ -130,6 +130,7 @@ END;
 $TEST$;
 
 SELECT count(*) > 0 FROM timescaledb_information.job_history WHERE succeeded IS FALSE AND err_message ~ 'failed to start job';
+SELECT count(*) > 0 FROM timescaledb_information.job_errors WHERE err_message ~ 'failed to start job';
 \set VERBOSITY terse
 
 \c :TEST_DBNAME :ROLE_SUPERUSER

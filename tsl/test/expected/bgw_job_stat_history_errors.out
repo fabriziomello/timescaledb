@@ -201,6 +201,12 @@ SELECT count(*) > 0 FROM timescaledb_information.job_history WHERE succeeded IS 
  t
 (1 row)
 
+SELECT count(*) > 0 FROM timescaledb_information.job_errors WHERE err_message ~ 'failed to start job';
+ ?column? 
+----------
+ t
+(1 row)
+
 \set VERBOSITY terse
 \c :TEST_DBNAME :ROLE_SUPERUSER
 SELECT _timescaledb_functions.stop_background_workers();
