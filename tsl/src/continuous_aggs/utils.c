@@ -875,16 +875,13 @@ create_cagg_get_bucket_function_datum(TupleDesc tupdesc, ContinuousAggsBucketFun
 /*
  * Get the bucket function information for the given materialized hypertable id.
  *
- * When running `cagg_get_bucket_function_info` the function returns the following fields:
+ * The function returns the following fields:
  * - oid: The Oid of the bucket function
  * - width: The width of the bucket function
  * - origin: The origin of the bucket function
  * - offset: The offset of the bucket function
  * - timezone: The timezone of the bucket function
  * - fixed_width: Is the bucket width fixed
- *
- * When running `cagg_get_bucket_function` the function returns the following fields:
- * - oid: The Oid of the bucket function
  */
 static Datum
 cagg_get_bucket_function_datum(int32 mat_hypertable_id, FunctionCallInfo fcinfo)
@@ -911,17 +908,6 @@ cagg_get_bucket_function_datum(int32 mat_hypertable_id, FunctionCallInfo fcinfo)
 		return create_cagg_get_bucket_function_datum(tupdesc, bf);
 
 	return ObjectIdGetDatum(bf->bucket_function);
-}
-
-/*
- * This function returns the `time_bucket` function Oid in the user view definition
- * of a given materialization hupertable.
- */
-Datum
-continuous_agg_get_bucket_function(PG_FUNCTION_ARGS)
-{
-	/* Return the oid of the bucket function */
-	PG_RETURN_DATUM(cagg_get_bucket_function_datum(PG_GETARG_INT32(0), NULL));
 }
 
 /*

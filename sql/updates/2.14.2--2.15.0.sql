@@ -89,23 +89,36 @@ FROM _timescaledb_catalog.hypertable;
 -- Rebuild the catalog table `_timescaledb_catalog.continuous_aggs_bucket_function`
 --
 
-CREATE OR REPLACE FUNCTION _timescaledb_functions.cagg_get_bucket_function(
-    mat_hypertable_id INTEGER
-) RETURNS regprocedure AS '@MODULE_PATHNAME@', 'ts_continuous_agg_get_bucket_function' LANGUAGE C STRICT VOLATILE;
+CREATE OR REPLACE FUNCTION _timescaledb_functions.cagg_get_bucket_function_info(
+    mat_hypertable_id INTEGER,
+    -- The bucket function
+    OUT bucket_func REGPROCEDURE,
+    -- `bucket_width` argument of the function, e.g. "1 month"
+    OUT bucket_width TEXT,
+    -- optional `origin` argument of the function provided by the user
+    OUT bucket_origin TEXT,
+    -- optional `offset` argument of the function provided by the user
+    OUT bucket_offset TEXT,
+    -- optional `timezone` argument of the function provided by the user
+    OUT bucket_timezone TEXT,
+    -- fixed or variable sized bucket
+    OUT bucket_fixed_width BOOLEAN
+) RETURNS RECORD AS '@MODULE_PATHNAME@', 'ts_continuous_agg_get_bucket_function_info' LANGUAGE C STRICT VOLATILE;
 
 -- Since we need now the regclass of the used bucket function, we have to recover it
 -- by parsing the view query by calling 'cagg_get_bucket_function'.
 CREATE TABLE _timescaledb_catalog._tmp_continuous_aggs_bucket_function AS
     SELECT
       mat_hypertable_id,
-      _timescaledb_functions.cagg_get_bucket_function(mat_hypertable_id),
-      bucket_width,
+      bf.bucket_func,
+      bf.bucket_width,
       origin,
       NULL::text AS bucket_offset,
       timezone,
       false AS bucket_fixed_width
     FROM
-      _timescaledb_catalog.continuous_aggs_bucket_function
+      _timescaledb_catalog.continuous_aggs_bucket_function,
+      LATERAL _timescaledb_functions.cagg_get_bucket_function_info(mat_hypertable_id) AS bf
     ORDER BY
          mat_hypertable_id;
 
@@ -143,9 +156,6 @@ SELECT pg_catalog.pg_extension_config_dump('_timescaledb_catalog.continuous_aggs
 GRANT SELECT ON TABLE _timescaledb_catalog.continuous_aggs_bucket_function TO PUBLIC;
 
 ANALYZE _timescaledb_catalog.continuous_aggs_bucket_function;
-
-ALTER EXTENSION timescaledb DROP FUNCTION _timescaledb_functions.cagg_get_bucket_function(INTEGER);
-DROP FUNCTION IF EXISTS _timescaledb_functions.cagg_get_bucket_function(INTEGER);
 
 --
 -- End rebuild the catalog table `_timescaledb_catalog.continuous_aggs_bucket_function`
@@ -198,9 +208,6 @@ $$;
 --
 
 -- (1) Create missing entries in _timescaledb_catalog.continuous_aggs_bucket_function
-CREATE OR REPLACE FUNCTION _timescaledb_functions.cagg_get_bucket_function(
-    mat_hypertable_id INTEGER
-) RETURNS regprocedure AS '@MODULE_PATHNAME@', 'ts_continuous_agg_get_bucket_function' LANGUAGE C STRICT VOLATILE;
 
 -- Make sure function points to the new version of TSDB
 CREATE OR REPLACE FUNCTION _timescaledb_functions.to_interval(unixtime_us BIGINT) RETURNS INTERVAL
@@ -211,22 +218,14 @@ CREATE OR REPLACE FUNCTION _timescaledb_functions.to_interval(unixtime_us BIGINT
 INSERT INTO _timescaledb_catalog.continuous_aggs_bucket_function
   SELECT
   mat_hypertable_id,
-  _timescaledb_functions.cagg_get_bucket_function(mat_hypertable_id),
-  -- Intervals needs to be converted into the proper interval format
-  -- Function name could be prefixed with 'public.'. Therefore LIKE instead of starts_with is used
-  CASE WHEN _timescaledb_functions.cagg_get_bucket_function(mat_hypertable_id)::text LIKE '%time_bucket(interval,%' THEN
-    _timescaledb_functions.to_interval(bucket_width)::text
-  ELSE
-    bucket_width::text
-  END,
+  bf.bucket_func,
+  bf.bucket_width,
   NULL, -- bucket_origin
   NULL, -- bucket_offset
   NULL, -- bucket_timezone
   true  -- bucket_fixed_width
-  FROM _timescaledb_catalog.continuous_agg WHERE bucket_width != -1;
-
-ALTER EXTENSION timescaledb DROP FUNCTION _timescaledb_functions.cagg_get_bucket_function(INTEGER);
-DROP FUNCTION IF EXISTS _timescaledb_functions.cagg_get_bucket_function(INTEGER);
+  FROM _timescaledb_catalog.continuous_agg, LATERAL _timescaledb_functions.cagg_get_bucket_function_info(mat_hypertable_id) AS bf
+  WHERE continuous_agg.bucket_width != -1;
 
 -- (2) Rebuild catalog table
 DROP VIEW IF EXISTS timescaledb_experimental.policies;
