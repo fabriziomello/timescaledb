@@ -281,3 +281,51 @@ SELECT * FROM sorted_bgw_log;
 
 -- Should return 1 row
 SELECT count(*) FROM conditions_by_day;
+
+SELECT delete_job(:job_id);
+
+SELECT
+    add_continuous_aggregate_policy(
+        'conditions_by_day',
+        start_offset => INTERVAL '15 days',
+        end_offset => NULL,
+        schedule_interval => INTERVAL '1 h',
+        buckets_per_batch => 5
+    ) AS job_id \gset
+
+SELECT
+    add_continuous_aggregate_policy(
+        'conditions_by_day_manual_refresh',
+        start_offset => INTERVAL '15 days',
+        end_offset => NULL,
+        schedule_interval => INTERVAL '1 h'
+    ) AS job_id \gset
+
+
+TRUNCATE bgw_log, conditions_by_day, conditions_by_day_manual_refresh, conditions;
+
+INSERT INTO conditions
+SELECT
+    t, d, 10
+FROM
+    generate_series(
+        NOW() - INTERVAL '30 days',
+        NOW(),
+        '1 hour'::interval) AS t,
+    generate_series(1,5) AS d;
+
+SELECT ts_bgw_params_reset_time(0, true);
+SELECT ts_bgw_db_scheduler_test_run_and_wait_for_scheduler_finish(25);
+SELECT * FROM sorted_bgw_log;
+
+-- Both continuous aggregates should have the same data
+SELECT count(*) FROM conditions_by_day;
+SELECT count(*) FROM conditions_by_day_manual_refresh;
+
+-- Should have no differences
+SELECT
+    count(*) > 0 AS has_diff
+FROM
+    ((SELECT * FROM conditions_by_day_manual_refresh ORDER BY 1, 2)
+    EXCEPT
+    (SELECT * FROM conditions_by_day ORDER BY 1, 2)) AS diff;

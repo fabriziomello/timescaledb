@@ -1014,8 +1014,7 @@ continuous_agg_split_refresh_window(ContinuousAgg *cagg, InternalTimeRange *orig
 		{
 			elog(LOG,
 				 "no min slice range start for continuous aggregate \"%s.%s\", falling back to "
-				 "single "
-				 "batch processing",
+				 "single batch processing",
 				 NameStr(cagg->data.user_view_schema),
 				 NameStr(cagg->data.user_view_name));
 			return NIL;
@@ -1039,7 +1038,7 @@ continuous_agg_split_refresh_window(ContinuousAgg *cagg, InternalTimeRange *orig
 	}
 
 	/* Check if the refresh size is large enough to produce bathes, if not then return no batches */
-	const int64 refresh_window_size = refresh_window.end - refresh_window.start;
+	const int64 refresh_window_size = i64abs(refresh_window.end - refresh_window.start);
 	const int64 batch_size = (bucket_width * buckets_per_batch);
 
 	if (refresh_window_size <= batch_size)
@@ -1076,7 +1075,7 @@ continuous_agg_split_refresh_window(ContinuousAgg *cagg, InternalTimeRange *orig
 	 * It takes in account the invalidation logs (hypertable and materialization hypertable) to
 	 * avoid producing wholes that have no data to be processed.
 	 *
-	 * The logic is somethinkg like the following:
+	 * The logic is something like the following:
 	 * 1. Get dimension slices from the original hypertables
 	 * 2. Get either hypertable and materialization hypertable invalidation logs
 	 * 3. Produce the batches in reverse order
