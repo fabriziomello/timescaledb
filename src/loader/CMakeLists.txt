@@ -5,7 +5,8 @@ set(SOURCES
     bgw_launcher.c
     bgw_interface.c
     function_telemetry.c
-    lwlocks.c)
+    lwlocks.c
+    ts_backend_status.c)
 
 set(TEST_SOURCES ${PROJECT_SOURCE_DIR}/test/src/symbol_conflict.c)
 

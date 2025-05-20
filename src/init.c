@@ -56,6 +56,8 @@ extern void _conn_mock_fini();
 
 extern void _chunk_append_init();
 
+extern void _backend_status_init(void);
+
 #if PG16_LT
 extern void TSDLLEXPORT _PG_init(void);
 #endif
@@ -114,6 +116,7 @@ _PG_init(void)
 	_process_utility_init();
 	_guc_init();
 	_conn_plain_init();
+	_backend_status_init();
 #ifdef TS_USE_OPENSSL
 	_conn_ssl_init();
 #endif
