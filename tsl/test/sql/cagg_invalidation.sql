@@ -121,6 +121,7 @@ SELECT materialization_id,
        lowest_modified_value,
        greatest_modified_value
        FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log
+       WHERE materialize IS FALSE
        ORDER BY 1,2,3
 $$;
 

@@ -795,7 +795,7 @@ select count(*) from _timescaledb_catalog.continuous_aggs_hypertable_invalidatio
      0
 (1 row)
 
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
  count 
 -------
      0
@@ -1579,8 +1579,8 @@ ORDER BY 1;
  _hyper_41_83_chunk | Sun Mar 18 16:00:00 2001 PST | Wed Aug 15 17:00:00 2001 PDT | f
 (2 rows)
 
-SELECT * FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log
-WHERE materialization_id = :'MAT_HTID' ORDER BY 1, 2,3;
+SELECT materialization_id, lowest_modified_value, greatest_modified_value FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log
+WHERE materialization_id = :'MAT_HTID' AND materialize IS FALSE ORDER BY 1, 2,3;
  materialization_id | lowest_modified_value | greatest_modified_value 
 --------------------+-----------------------+-------------------------
                  41 |  -9223372036854775808 |     -210866803200000001

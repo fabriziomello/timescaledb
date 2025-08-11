@@ -75,18 +75,18 @@ select * from cagg_2 order by 1, 2;
 INSERT INTO continuous_agg_test VALUES
     (10, -4, 1000);
 select count(*) from _timescaledb_catalog.continuous_aggs_hypertable_invalidation_log;
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
 CALL refresh_continuous_aggregate('cagg_1', NULL, NULL);
 select count(*) from _timescaledb_catalog.continuous_aggs_hypertable_invalidation_log;
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
 
 --now drop cagg_1, should still have materialization_invalidation_log
 DROP MATERIALIZED VIEW cagg_1;
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
 --cagg_2 still exists
 select view_name from timescaledb_information.continuous_aggregates;
 drop table continuous_agg_test cascade;
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
 select view_name from timescaledb_information.continuous_aggregates;
 
 --TEST4: invalidations that are copied over by cagg1 are not deleted by cagg2 refresh if
@@ -129,7 +129,7 @@ CALL refresh_continuous_aggregate('cagg_2', NULL, 14);
 select * from cagg_2 order by 1;
 SET ROLE :ROLE_SUPERUSER;
 select * from _timescaledb_catalog.continuous_aggs_invalidation_threshold order by 1;
-select * from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log order by 1;
+select materialization_id, lowest_modified_value, greatest_modified_value from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false order by 1;
 SET ROLE :ROLE_DEFAULT_PERM_USER;
 --this insert will be processed only by cagg_1 and cagg_2 will process the previous
 --one
@@ -147,7 +147,7 @@ select * from _timescaledb_catalog.continuous_aggs_hypertable_invalidation_log o
 CALL refresh_continuous_aggregate('cagg_1', NULL, NULL);
 select * from cagg_1 where timed = 18 ;
 --copied over for cagg_2 to process later?
-select * from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log order by 1;
+select materialization_id, lowest_modified_value, greatest_modified_value from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false order by 1;
 DROP MATERIALIZED VIEW cagg_1;
 DROP MATERIALIZED VIEW cagg_2;
 

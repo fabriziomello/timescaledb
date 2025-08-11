@@ -757,7 +757,7 @@ INSERT INTO temperature
     FROM generate_series('2020-02-01 01:00:00 PST'::timestamptz,
                          '2020-02-01 23:59:59 PST','1m') time;
 
-SELECT * FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log ORDER BY 1, 2, 3;
+SELECT materialization_id, lowest_modified_value, greatest_modified_value FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log WHERE materialize IS FALSE ORDER BY 1, 2, 3;
 
 CREATE MATERIALIZED VIEW cagg_1_year
   WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
@@ -765,7 +765,7 @@ CREATE MATERIALIZED VIEW cagg_1_year
     FROM temperature
     GROUP BY 1 ORDER BY 1;
 
-SELECT * FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log ORDER BY 1, 2, 3;
+SELECT materialization_id, lowest_modified_value, greatest_modified_value FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log WHERE materialize IS FALSE ORDER BY 1, 2, 3;
 
 ---
 -- Tests with integer based hypertables

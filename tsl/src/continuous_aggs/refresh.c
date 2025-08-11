@@ -756,6 +756,8 @@ process_cagg_invalidations_and_refresh(const ContinuousAgg *cagg,
 												  context,
 												  force);
 
+	SPI_commit_and_chain();
+
 	if (invalidations != NULL || do_merged_refresh)
 	{
 		if (context.callctx == CAGG_REFRESH_CREATION)

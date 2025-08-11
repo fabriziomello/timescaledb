@@ -226,6 +226,7 @@ AS $$
       AND greatest_modified_value
           BETWEEN min_max_values.min
               AND min_max_values.max
+      AND materialize IS FALSE;
 $$
 LANGUAGE SQL
 SET search_path TO pg_catalog, pg_temp;

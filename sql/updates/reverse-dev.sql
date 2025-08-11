@@ -165,3 +165,38 @@ $$;
 UPDATE _timescaledb_catalog.compression_settings
 SET segmentby = NULL
 WHERE segmentby = '{}';
+
+-- Remove column `materialize` from continuous aggs materialization invalidation log
+ALTER EXTENSION timescaledb
+  DROP TABLE _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+
+ALTER TABLE _timescaledb_catalog.continuous_aggs_materialization_invalidation_log
+  DROP COLUMN materialize;
+
+CREATE TABLE _timescaledb_catalog._tmp_continuous_aggs_materialization_invalidation_log (
+  LIKE _timescaledb_catalog.continuous_aggs_materialization_invalidation_log
+  INCLUDING ALL
+  EXCLUDING INDEXES
+  EXCLUDING CONSTRAINTS
+);
+
+INSERT INTO _timescaledb_catalog._tmp_continuous_aggs_materialization_invalidation_log (materialization_id, lowest_modified_value, greatest_modified_value)
+SELECT materialization_id, lowest_modified_value, greatest_modified_value FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+
+DROP TABLE _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+
+ALTER TABLE _timescaledb_catalog._tmp_continuous_aggs_materialization_invalidation_log
+  RENAME TO continuous_aggs_materialization_invalidation_log;
+
+ALTER TABLE _timescaledb_catalog._tmp_continuous_aggs_materialization_invalidation_log
+  ADD CONSTRAINT continuous_aggs_materialization_invalid_materialization_id_fkey
+  FOREIGN KEY (materialization_id)
+  REFERENCES _timescaledb_catalog.continuous_agg (mat_hypertable_id) ON DELETE CASCADE;
+
+SELECT pg_catalog.pg_extension_config_dump('_timescaledb_catalog.continuous_aggs_materialization_invalidation_log', '');
+
+CREATE INDEX continuous_aggs_materialization_invalidation_log_idx ON _timescaledb_catalog.continuous_aggs_materialization_invalidation_log (materialization_id, lowest_modified_value ASC);
+
+GRANT SELECT ON TABLE _timescaledb_catalog.continuous_aggs_materialization_invalidation_log TO PUBLIC;
+
+ANALYZE _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;

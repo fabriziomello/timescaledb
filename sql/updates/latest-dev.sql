@@ -238,3 +238,10 @@ SET index = COALESCE(index, '[]'::jsonb) ||
             )
 WHERE cs.orderby IS NOT NULL AND cardinality(cs.orderby) > 0;
 
+-- Add `materialize` column to continuous aggs materialization invalidation log
+ALTER TABLE
+    _timescaledb_catalog.continuous_aggs_materialization_invalidation_log
+    ADD COLUMN materialize boolean NOT NULL DEFAULT FALSE;
+
+DROP INDEX IF EXISTS _timescaledb_catalog.continuous_aggs_materialization_invalidation_log_idx;
+CREATE INDEX continuous_aggs_materialization_invalidation_log_idx ON _timescaledb_catalog.continuous_aggs_materialization_invalidation_log (materialize, materialization_id, lowest_modified_value ASC);

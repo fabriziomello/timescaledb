@@ -167,7 +167,7 @@ select count(*) from _timescaledb_catalog.continuous_aggs_hypertable_invalidatio
      1
 (1 row)
 
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
  count 
 -------
      4
@@ -180,7 +180,7 @@ select count(*) from _timescaledb_catalog.continuous_aggs_hypertable_invalidatio
      0
 (1 row)
 
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
  count 
 -------
      5
@@ -189,7 +189,7 @@ select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invali
 --now drop cagg_1, should still have materialization_invalidation_log
 DROP MATERIALIZED VIEW cagg_1;
 NOTICE:  drop cascades to table _timescaledb_internal._hyper_2_5_chunk
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
  count 
 -------
      3
@@ -205,7 +205,7 @@ select view_name from timescaledb_information.continuous_aggregates;
 drop table continuous_agg_test cascade;
 NOTICE:  drop cascades to 2 other objects
 NOTICE:  drop cascades to table _timescaledb_internal._hyper_3_6_chunk
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
  count 
 -------
      0
@@ -299,7 +299,7 @@ select * from _timescaledb_catalog.continuous_aggs_invalidation_threshold order 
              4 |        18
 (1 row)
 
-select * from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log order by 1;
+select materialization_id, lowest_modified_value, greatest_modified_value from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false order by 1;
  materialization_id | lowest_modified_value | greatest_modified_value 
 --------------------+-----------------------+-------------------------
                   5 |  -9223372036854775808 |             -2147483649
@@ -351,7 +351,7 @@ select * from cagg_1 where timed = 18 ;
 (1 row)
 
 --copied over for cagg_2 to process later?
-select * from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log order by 1;
+select materialization_id, lowest_modified_value, greatest_modified_value from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false order by 1;
  materialization_id | lowest_modified_value | greatest_modified_value 
 --------------------+-----------------------+-------------------------
                   5 |  -9223372036854775808 |             -2147483649

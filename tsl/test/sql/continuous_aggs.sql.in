@@ -624,7 +624,7 @@ FROM _timescaledb_catalog.continuous_agg ca
 WHERE user_view_name = 'mat_drop_test';
 select count(*) from _timescaledb_catalog.continuous_aggs_invalidation_threshold;
 select count(*) from _timescaledb_catalog.continuous_aggs_hypertable_invalidation_log;
-select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log;
+select count(*) from _timescaledb_catalog.continuous_aggs_materialization_invalidation_log where materialize is false;
 
 SELECT * FROM _timescaledb_config.bgw_job;
 
@@ -1145,8 +1145,8 @@ FROM timescaledb_information.chunks
 WHERE hypertable_name = :'MAT_TABLE_NAME'
 ORDER BY 1;
 
-SELECT * FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log
-WHERE materialization_id = :'MAT_HTID' ORDER BY 1, 2,3;
+SELECT materialization_id, lowest_modified_value, greatest_modified_value FROM _timescaledb_catalog.continuous_aggs_materialization_invalidation_log
+WHERE materialization_id = :'MAT_HTID' AND materialize IS FALSE ORDER BY 1, 2,3;
 
 SELECT * from search_query_count_3
 WHERE bucket > '2001-01-01'
