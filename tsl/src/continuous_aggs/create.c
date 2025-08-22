@@ -304,7 +304,7 @@ cagg_create_hypertable(int32 hypertable_id, Oid mat_tbloid, const char *matpartc
 					   int64 mat_tbltimecol_interval)
 {
 	bool created;
-	int flags = 0;
+	uint32 flags = HYPERTABLE_CREATE_DISABLE_DEFAULT_INDEXES;
 	NameData mat_tbltimecol;
 	DimensionInfo *time_dim_info;
 	ChunkSizingInfo *chunk_sizing_info;
@@ -474,50 +474,73 @@ static void
 mattablecolumninfo_add_mattable_index(MaterializationHypertableColumnInfo *matcolinfo,
 									  Hypertable *ht)
 {
+	NameData indxname;
+	ObjectAddress indxaddr;
+	HeapTuple indxtuple;
+	List *indxelements = NIL;
+
 	IndexStmt stmt = {
 		.type = T_IndexStmt,
 		.accessMethod = DEFAULT_INDEX_TYPE,
 		.idxname = NULL,
 		.relation = makeRangeVar(NameStr(ht->fd.schema_name), NameStr(ht->fd.table_name), 0),
 		.tableSpace = get_tablespace_name(get_rel_tablespace(ht->main_table_relid)),
+		.unique = true,
+		.nulls_not_distinct = true,
 	};
 	IndexElem timeelem = { .type = T_IndexElem,
 						   .name = matcolinfo->matpartcolname,
 						   .ordering = SORTBY_DESC };
 	ListCell *le = NULL;
+	StringInfo buf = makeStringInfo();
+	char *sep = "";
+
+	if (list_length(matcolinfo->mat_groupcolname_list) == 0)
+		return;
+
 	foreach (le, matcolinfo->mat_groupcolname_list)
 	{
-		NameData indxname;
-		ObjectAddress indxaddr;
-		HeapTuple indxtuple;
 		char *grpcolname = (char *) lfirst(le);
-		IndexElem grpelem = { .type = T_IndexElem, .name = grpcolname };
-		stmt.indexParams = list_make2(&grpelem, &timeelem);
-		indxaddr = DefineIndexCompat(ht->main_table_relid,
-									 &stmt,
-									 InvalidOid, /* indexRelationId */
-									 InvalidOid, /* parentIndexId */
-									 InvalidOid, /* parentConstraintId */
-									 -1,		 /* total_parts */
-									 false,		 /* is_alter_table */
-									 false,		 /* check_rights */
-									 false,		 /* check_not_in_use */
-									 false,		 /* skip_build */
-									 false);	 /* quiet */
-		indxtuple = SearchSysCache1(RELOID, ObjectIdGetDatum(indxaddr.objectId));
+		IndexElem *grpelem = makeNode(IndexElem);
+		grpelem->name = pstrdup(grpcolname);
 
-		if (!HeapTupleIsValid(indxtuple))
-			elog(ERROR, "cache lookup failed for index relid %u", indxaddr.objectId);
-		indxname = ((Form_pg_class) GETSTRUCT(indxtuple))->relname;
-		elog(DEBUG1,
-			 "adding index %s ON %s.%s USING BTREE(%s, %s)",
-			 NameStr(indxname),
-			 NameStr(ht->fd.schema_name),
-			 NameStr(ht->fd.table_name),
-			 grpcolname,
-			 matcolinfo->matpartcolname);
-		ReleaseSysCache(indxtuple);
+		indxelements = lappend(indxelements, grpelem);
+
+		appendStringInfoString(buf, grpelem->name);
+		appendStringInfoString(buf, sep);
+		sep = ", ";
 	}
+
+	indxelements = lappend(indxelements, &timeelem);
+	stmt.indexParams = indxelements;
+
+	indxaddr = DefineIndexCompat(ht->main_table_relid,
+								 &stmt,
+								 InvalidOid, /* indexRelationId */
+								 InvalidOid, /* parentIndexId */
+								 InvalidOid, /* parentConstraintId */
+								 -1,		 /* total_parts */
+								 false,		 /* is_alter_table */
+								 false,		 /* check_rights */
+								 false,		 /* check_not_in_use */
+								 false,		 /* skip_build */
+								 false);	 /* quiet */
+
+	indxtuple = SearchSysCache1(RELOID, ObjectIdGetDatum(indxaddr.objectId));
+
+	if (!HeapTupleIsValid(indxtuple))
+		elog(ERROR, "cache lookup failed for index relid %u", indxaddr.objectId);
+
+	indxname = ((Form_pg_class) GETSTRUCT(indxtuple))->relname;
+
+	elog(DEBUG1,
+		 "adding index %s ON %s.%s USING BTREE(%s)",
+		 NameStr(indxname),
+		 NameStr(ht->fd.schema_name),
+		 NameStr(ht->fd.table_name),
+		 buf->data);
+
+	ReleaseSysCache(indxtuple);
 }
 
 /*
